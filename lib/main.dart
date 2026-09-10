@@ -77,7 +77,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       // 建立 Multipart 請求
       var request = http.MultipartRequest(
         'POST',
-        Uri.parse('http://127.0.0.1:8000/api/scan-envelope'),
+        Uri.parse('http://192.168.1.73:8000/api/scan-envelope'),
       );
 
       request.fields['archive_date'] = formattedDate;
