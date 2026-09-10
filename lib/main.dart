@@ -1,267 +1,253 @@
-import 'package:flutter/foundation.dart';
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
-import 'dart:convert';
+import 'package:intl/intl.dart';
 
 void main() {
-  runApp(const EnvelopeScannerApp());
+  runApp(const MailScannerApp());
 }
 
-class EnvelopeScannerApp extends StatelessWidget {
-  const EnvelopeScannerApp({Key? key}) : super(key: key);
+class MailScannerApp extends StatelessWidget {
+  const MailScannerApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: '企業掛號信掃描與歸檔',
       theme: ThemeData(
-        primarySwatch: Colors.blue,
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        useMaterial3: true,
       ),
-      home: const ScannerHomePage(),
-      debugShowCheckedModeBanner: false,
+      home: const ScanHomePage(),
     );
   }
 }
 
-class ScannerHomePage extends StatefulWidget {
-  const ScannerHomePage({Key? key}) : super(key: key);
+class ScanHomePage extends StatefulWidget {
+  const ScanHomePage({super.key});
 
   @override
-  State<ScannerHomePage> createState() => _ScannerHomePageState();
+  State<ScanHomePage> createState() => _ScanHomePageState();
 }
 
-class _ScannerHomePageState extends State<ScannerHomePage> {
-  DateTime selectedDate = DateTime.now();
-  bool isLoading = false;
-  String? errorMessage;
-  Map<String, dynamic>? scanResult;
+class _ScanHomePageState extends State<ScanHomePage> {
+  final String serverUrl = 'http://192.168.1.73:8000/api/scan-envelope';
+  final ImagePicker _picker = ImagePicker();
 
-  // 彈出日期選擇視窗
+  DateTime _selectedDate = DateTime.now();
+  bool _isProcessing = false;
+  String _statusMessage = '';
+  List<Map<String, dynamic>> _scanResults = [];
+
+  // 選擇日期
   Future<void> _selectDate(BuildContext context) async {
     final DateTime? picked = await showDatePicker(
       context: context,
-      initialDate: selectedDate,
-      firstDate: DateTime(2023),
+      initialDate: _selectedDate,
+      firstDate: DateTime(2020),
       lastDate: DateTime(2030),
     );
-    if (picked != null && picked != selectedDate) {
+    if (picked != null && picked != _selectedDate) {
       setState(() {
-        selectedDate = picked;
+        _selectedDate = picked;
       });
     }
   }
 
-  // 選擇圖片並上傳至 FastAPI 後端
-  Future<void> _pickAndUploadImage() async {
-    final ImagePicker picker = ImagePicker();
-    final XFile? image = await picker.pickImage(source: ImageSource.gallery);
+  // 底部彈出選單：拍照或相簿多選
+  void _showImageSourcePicker() {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt),
+              title: const conscienceText('立即拍照'),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _captureFromCamera();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library),
+              title: const Text('從相簿多選相片'),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _pickMultipleImages();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
-    if (image == null) return;
+  // 相機拍攝單張
+  Future<void> _captureFromCamera() async {
+    final XFile? photo = await _picker.pickImage(source: ImageSource.camera);
+    if (photo != null) {
+      await _uploadAndProcessImages([photo]);
+    }
+  }
 
+  // 相簿多選
+  Future<void> _pickMultipleImages() async {
+    final List<XFile> images = await _picker.pickMultiImage();
+    if (images.isNotEmpty) {
+      await _uploadAndProcessImages(images);
+    }
+  }
+
+  // 逐張上傳與辨識
+  Future<void> _uploadAndProcessImages(List<XFile> files) async {
     setState(() {
-      isLoading = true;
-      errorMessage = null;
-      scanResult = null;
+      _isProcessing = true;
+      _statusMessage = '準備上傳...';
+      _scanResults.clear();
     });
 
-    try {
-      // 讀取圖片位元組
-      Uint8List imageBytes = await image.readAsBytes();
+    final String dateString = DateFormat('yyyy-MM-dd').format(_selectedDate);
 
-      // 格式化日期字串 (YYYY-MM-DD)
-      String formattedDate = "${selectedDate.year.toString().padLeft(4, '0')}-"
-                             "${selectedDate.month.toString().padLeft(2, '0')}-"
-                             "${selectedDate.day.toString().padLeft(2, '0')}";
+    for (int i = 0; i < files.length; i++) {
+      final file = files[i];
+      setState(() {
+        _statusMessage = '正在處理第 ${i + 1} / ${files.length} 張照片...';
+      });
 
-      // 建立 Multipart 請求
-      var request = http.MultipartRequest(
-        'POST',
-        Uri.parse('http://192.168.1.73:8000/api/scan-envelope'),
-      );
+      try {
+        var request = http.MultipartRequest('POST', Uri.parse(serverUrl));
+        request.fields['archive_date'] = dateString;
+        request.files.add(await http.MultipartFile.fromPath('file', file.path));
 
-      request.fields['archive_date'] = formattedDate;
-      request.files.add(
-        http.MultipartFile.fromBytes(
-          'file',
-          imageBytes,
-          filename: image.name,
-        ),
-      );
+        var streamedResponse = await request.send();
+        var response = await http.Response.fromStream(streamedResponse);
 
-      var streamedResponse = await request.send();
-      var response = await http.Response.fromStream(streamedResponse);
-
-      if (response.statusCode == 200) {
-        var data = json.decode(utf8.decode(response.bodyBytes));
-        setState(() {
-          scanResult = data['data'];
-        });
-      } else {
-        var errorData = json.decode(utf8.decode(response.bodyBytes));
-        setState(() {
-          errorMessage = errorData['detail'] ?? '伺服器發生未知錯誤 (代碼: ${response.statusCode})';
+        if (response.statusCode == 200) {
+          final resultData = jsonDecode(utf8.decode(response.bodyBytes));
+          _scanResults.add({
+            'file': file.name,
+            'status': '成功',
+            'data': resultData,
+          });
+        } else {
+          _scanResults.add({
+            'file': file.name,
+            'status': '失敗 (${response.statusCode})',
+            'data': response.body,
+          });
+        }
+      } catch (e) {
+        _scanResults.add({
+          'file': file.name,
+          'status': '連線失敗',
+          'data': e.toString(),
         });
       }
-    } catch (e) {
-      setState(() {
-        errorMessage = '連線錯誤: $e';
-      });
-    } finally {
-      setState(() {
-        isLoading = false;
-      });
     }
+
+    setState(() {
+      _isProcessing = false;
+      _statusMessage = '全數處理完成！共 ${files.length} 張';
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    String formattedDate = "${selectedDate.year.toString().padLeft(4, '0')}-"
-                           "${selectedDate.month.toString().padLeft(2, '0')}-"
-                           "${selectedDate.day.toString().padLeft(2, '0')}";
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('企業掛號信掃描與歸檔'),
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
       ),
       body: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 600),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // 1. 日期選擇區塊
-                Card(
-                  elevation: 2,
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          '歸檔日期: $formattedDate',
-                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                        ),
-                        ElevatedButton.icon(
-                          onPressed: isLoading ? null : () => _selectDate(context),
-                          icon: const Icon(Icons.calendar_today),
-                          label: const Text('選擇日期'),
-                        ),
-                      ],
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            // 歸檔日期列
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '歸檔日期: ${DateFormat('yyyy-MM-dd').format(_selectedDate)}',
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                     ),
-                  ),
+                    ElevatedButton.icon(
+                      onPressed: () => _selectDate(context),
+                      icon: const Icon(Icons.calendar_today, size: 18),
+                      label: const Text('選擇日期'),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 20),
-
-                // 2. 拍照/選擇圖片按鈕
-                ElevatedButton.icon(
-                  onPressed: isLoading ? null : _pickAndUploadImage,
-                  icon: const Icon(Icons.camera_alt, size: 24),
-                  label: const Text(
-                    '開啟相機或選取信封照片',
-                    style: TextStyle(fontSize: 18),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                  ),
-                ),
-                const SizedBox(height: 20),
-
-                // 3. 載入狀態 (轉圈圈)
-                if (isLoading)
-                  const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(20.0),
-                      child: CircularProgressIndicator(),
-                    ),
-                  ),
-
-                // 4. 錯誤訊息提示（包含 Excel 被佔用等狀況）
-                if (errorMessage != null)
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.red.shade50,
-                      border: Border.all(color: Colors.red.shade300),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.error, color: Colors.red),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            errorMessage!,
-                            style: const TextStyle(color: Colors.red, fontSize: 16),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                // 5. 辨識成功結果顯示
-                if (scanResult != null) ...[
-                  const SizedBox(height: 10),
-                  Expanded(
-                    child: Card(
-                      elevation: 3,
-                      child: Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: ListView(
-                          children: [
-                            const Text(
-                              '✅ 辨識與歸檔成功！',
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.green,
-                              ),
-                            ),
-                            const Divider(),
-                            _buildResultRow('追蹤號碼', scanResult!['tracking_number']),
-                            _buildResultRow('寄件人姓名', scanResult!['sender_name']),
-                            _buildResultRow('寄件人地址', scanResult!['sender_address']),
-                            _buildResultRow('收件人姓名', scanResult!['recipient_name']),
-                            _buildResultRow('收件部門', scanResult!['recipient_department']),
-                            _buildResultRow('收件人地址', scanResult!['recipient_address']),
-                            _buildResultRow('歸檔日期', scanResult!['archive_date']),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ],
+              ),
             ),
-          ),
+            const SizedBox(height: 16),
+
+            // 操作按鈕
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton.icon(
+                onPressed: _isProcessing ? null : _showImageSourcePicker,
+                icon: const Icon(Icons.camera_alt),
+                label: Text(
+                  _isProcessing ? '正在處理中...' : '開啟相機或選取信封照片',
+                  style: const TextStyle(fontSize: 16),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // 處理中進度指示
+            if (_isProcessing) ...[
+              const LinearProgressIndicator(),
+              const SizedBox(height: 8),
+              Text(_statusMessage, style: const TextStyle(color: Colors.blueGrey)),
+              const SizedBox(height: 16),
+            ],
+
+            // 辨識結果展示列表
+            Expanded(
+              child: _scanResults.isEmpty
+                  ? Center(child: Text(_statusMessage.isEmpty ? '尚無辨識結果' : _statusMessage))
+                  : ListView.builder(
+                      itemCount: _scanResults.length,
+                      itemBuilder: (ctx, index) {
+                        final item = _scanResults[index];
+                        final bool isSuccess = item['status'] == '成功';
+                        return Card(
+                          margin: const EdgeInsets.symmetric(vertical: 6),
+                          color: isSuccess ? Colors.green.shade50 : Colors.red.shade50,
+                          child: ListTile(
+                            leading: Icon(
+                              isSuccess ? Icons.check_circle : Icons.error,
+                              color: isSuccess ? Colors.green : Colors.red,
+                            ),
+                            title: Text('檔案: ${item['file']} (${item['status']})'),
+                            subtitle: Text(
+                              '內容: ${item['data'].toString()}',
+                              maxLines: 3,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
         ),
       ),
     );
   }
+}
 
-  Widget _buildResultRow(String label, dynamic value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 120,
-            child: Text(
-              '$label:',
-              style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value != null ? value.toString() : '無',
-              style: const TextStyle(fontSize: 16),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+class conscienceText extends StatelessWidget {
+  final String text;
+  const conscienceText(this.text, {super.key});
+  @override
+  Widget build(BuildContext context) => Text(text);
 }
