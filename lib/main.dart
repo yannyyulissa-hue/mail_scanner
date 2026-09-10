@@ -30,7 +30,6 @@ class MailScannerApp extends StatelessWidget {
   }
 }
 
-// 掃描卡片項目物件
 class ScanItem {
   final String fileName;
   final String filePath;
@@ -57,11 +56,9 @@ class ScannerHomePage extends StatefulWidget {
 }
 
 class _ScannerHomePageState extends State<ScannerHomePage> {
-  // 正式 Cloud Run 網址
   final String serverUrl =
       'https://mail-scanner-backend-371376741005.asia-east1.run.app/api/scan-envelope';
 
-  // 指定之 Google 試算表連結
   final String sheetUrl =
       'https://docs.google.com/spreadsheets/d/1cPsfn_ggu01fsXG4XHxeiwS4ie5cQg4WO4QiYAW4BfE/edit?usp=sharing';
 
@@ -70,7 +67,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   final List<ScanItem> _scanItems = [];
   bool _isUploadingBatch = false;
 
-  // 開啟 Google 雲端試算表
   Future<void> _launchSheetUrl() async {
     final uri = Uri.parse(sheetUrl);
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
@@ -82,7 +78,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     }
   }
 
-  // 選擇歸檔日期
   Future<void> _pickDate() async {
     final DateTime? picked = await showDatePicker(
       context: context,
@@ -97,7 +92,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     }
   }
 
-  // 清空紀錄
   void _clearItems() {
     if (_scanItems.isEmpty) return;
 
@@ -126,7 +120,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
-  // 選取照片（拍照或多選）
   Future<void> _pickAndProcessImages() async {
     if (_isUploadingBatch) return;
 
@@ -166,7 +159,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
-  // 循序佇列處理（一張完成接下一張，杜絕斷線）
   Future<void> _processImagesQueue(List<XFile> files) async {
     setState(() {
       _isUploadingBatch = true;
@@ -188,7 +180,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     });
   }
 
-  // 單張上傳處理
   Future<void> _uploadSingleImage(ScanItem item) async {
     final archiveDateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
 
@@ -248,7 +239,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         titleSpacing: 12,
         title: Row(
           children: [
-            // 自繪高解析企業 Logo
             const CorporateLogoWidget(size: 32),
             const SizedBox(width: 10),
             const Expanded(
@@ -278,7 +268,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Column(
           children: [
-            // 歸檔日期與試算表入口列
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
@@ -334,8 +323,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               ),
             ),
             const SizedBox(height: 12),
-
-            // 主操作區：拍照掃描 + 快捷試算表
             Row(
               children: [
                 Expanded(
@@ -385,7 +372,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   ),
                 ),
                 const SizedBox(width: 10),
-                // 雲端試算表快捷按鈕
                 Expanded(
                   flex: 1,
                   child: InkWell(
@@ -410,8 +396,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               ],
             ),
             const SizedBox(height: 14),
-
-            // 清單控制列（包含「清空記錄」按鈕）
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -448,8 +432,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               ],
             ),
             const SizedBox(height: 8),
-
-            // 卡片清單區
             Expanded(
               child: _scanItems.isEmpty
                   ? Center(
@@ -479,7 +461,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
-  // 打造現代化結果卡片
   Widget _buildItemCard(ScanItem item) {
     if (item.isProcessing) {
       return Card(
@@ -574,7 +555,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       );
     }
 
-    // 失敗狀態
     return Card(
       color: const Color(0xFFFFFBFB),
       margin: const EdgeInsets.only(bottom: 12),
@@ -661,7 +641,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   }
 }
 
-// 企業 Logo 自繪組件（上藍橢圓、下綠橢圓，中間白色 H）
 class CorporateLogoWidget extends StatelessWidget {
   final double size;
   const CorporateLogoWidget({super.key, this.size = 32});
@@ -671,58 +650,45 @@ class CorporateLogoWidget extends StatelessWidget {
     return SizedBox(
       width: size * 1.15,
       height: size,
-      child: CustomPaint(
-        painter: CorporateLogoPainter(),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            height: size * 0.52,
+            child: Container(
+              decoration: const BoxDecoration(
+                color: Color(0xFF00A0E9),
+                borderRadius: BorderRadius.all(Radius.elliptical(100, 50)),
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: size * 0.52,
+            child: Container(
+              decoration: const BoxDecoration(
+                color: Color(0xFF009944),
+                borderRadius: BorderRadius.all(Radius.elliptical(100, 50)),
+              ),
+            ),
+          ),
+          Text(
+            'H',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: size * 0.72,
+              fontWeight: FontWeight.w900,
+              fontFamily: 'serif',
+              height: 1.0,
+            ),
+          ),
+        ],
       ),
     );
   }
-}
-
-class CorporateLogoPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-
-    // 上半部藍色橢圓
-    final bluePaint = Paint()
-      ..color = const Color(0xFF00A0E9)
-      ..style = PaintingStyle.fill;
-    canvas.drawOval(
-      Rect.fromCenter(center: Offset(w / 2, h * 0.33), width: w * 0.95, height: h * 0.52),
-      bluePaint,
-    );
-
-    // 下半部綠色橢圓
-    final greenPaint = Paint()
-      ..color = const Color(0xFF009944)
-      ..style = PaintingStyle.fill;
-    canvas.drawOval(
-      Rect.fromCenter(center: Offset(w / 2, h * 0.67), width: w * 0.95, height: h * 0.52),
-      greenPaint,
-    );
-
-    // 中間白色 H 襯線體
-    final textPainter = TextPainter(
-      text: TextSpan(
-        text: 'H',
-        style: TextStyle(
-          color: Colors.white,
-          fontSize: h * 0.82,
-          fontWeight: FontWeight.w900,
-          fontFamily: 'serif',
-          height: 1.0,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    );
-    textPainter.layout();
-    textPainter.paint(
-      canvas,
-      Offset((w - textPainter.width) / 2, (h - textPainter.height) / 2),
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
