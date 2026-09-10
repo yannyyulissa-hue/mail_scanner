@@ -33,7 +33,7 @@ class ScanHomePage extends StatefulWidget {
 
 class _ScanHomePageState extends State<ScanHomePage> {
   // 電腦後端 API 位址
-  final String serverUrl = 'http://192.168.1.73:8000/api/scan-envelope';
+  final String serverUrl = 'https://mail-scanner-backend-371376741005.asia-east1.run.app/api/scan-envelope';
   final ImagePicker _picker = ImagePicker();
 
   DateTime _selectedDate = DateTime.now();
