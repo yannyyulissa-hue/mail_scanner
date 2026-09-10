@@ -1,7 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 void main() {
@@ -15,39 +16,60 @@ class MailScannerApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: '企業掛號信掃描與歸檔',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF7C4DFF)),
         useMaterial3: true,
+        scaffoldBackgroundColor: const Color(0xFFF7F6FB),
       ),
-      home: const ScanHomePage(),
+      home: const ScannerHomePage(),
     );
   }
 }
 
-class ScanHomePage extends StatefulWidget {
-  const ScanHomePage({super.key});
+class ScannerHomePage extends StatefulWidget {
+  const ScannerHomePage({super.key});
 
   @override
-  State<ScanHomePage> createState() => _ScanHomePageState();
+  State<ScannerHomePage> createState() => _ScannerHomePageState();
 }
 
-class _ScanHomePageState extends State<ScanHomePage> {
-  // 電腦後端 API 位址
-  final String serverUrl = 'https://mail-scanner-backend-371376741005.asia-east1.run.app/api/scan-envelope';
+// 掃描卡片項目狀態物件
+class ScanItem {
+  final String fileName;
+  final String filePath;
+  bool isProcessing;
+  bool isSuccess;
+  String? errorMessage;
+  Map<String, dynamic>? data;
+
+  ScanItem({
+    required this.fileName,
+    required this.filePath,
+    this.isProcessing = true,
+    this.isSuccess = false,
+    this.errorMessage,
+    this.data,
+  });
+}
+
+class _ScannerHomePageState extends State<ScannerHomePage> {
+  // 正式 Cloud Run 後端網址
+  final String serverUrl =
+      'https://mail-scanner-backend-371376741005.asia-east1.run.app/api/scan-envelope';
+
   final ImagePicker _picker = ImagePicker();
-
   DateTime _selectedDate = DateTime.now();
-  bool _isProcessing = false;
-  String _statusMessage = '';
-  final List<Map<String, dynamic>> _scanResults = [];
+  final List<ScanItem> _scanItems = [];
+  bool _isUploadingBatch = false;
 
-  // 日期選擇器
-  Future<void> _selectDate(BuildContext context) async {
+  // 選擇歸檔日期
+  Future<void> _pickDate() async {
     final DateTime? picked = await showDatePicker(
       context: context,
       initialDate: _selectedDate,
       firstDate: DateTime(2020),
-      lastDate: DateTime(2030),
+      lastDate: DateTime(2035),
     );
     if (picked != null && picked != _selectedDate) {
       setState(() {
@@ -56,27 +78,39 @@ class _ScanHomePageState extends State<ScanHomePage> {
     }
   }
 
-  // 底部選單：拍照或相簿多選
-  void _showImageSourcePicker() {
+  // 選取照片（支援多張選取與相機拍照）
+  Future<void> _pickAndProcessImages() async {
+    if (_isUploadingBatch) return;
+
     showModalBottomSheet(
       context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
       builder: (ctx) => SafeArea(
         child: Wrap(
           children: [
             ListTile(
               leading: const Icon(Icons.camera_alt),
-              title: const Text('開啟相機拍照'),
-              onTap: () {
-                Navigator.of(ctx).pop();
-                _captureFromCamera();
+              title: const Text('拍照'),
+              onTap: () async {
+                Navigator.pop(ctx);
+                final XFile? photo =
+                    await _picker.pickImage(source: ImageSource.camera);
+                if (photo != null) {
+                  _processImagesQueue([photo]);
+                }
               },
             ),
             ListTile(
               leading: const Icon(Icons.photo_library),
-              title: const Text('從相簿多選相片'),
-              onTap: () {
-                Navigator.of(ctx).pop();
-                _pickMultipleImages();
+              title: const Text('從相簿選擇（可多選）'),
+              onTap: () async {
+                Navigator.pop(ctx);
+                final List<XFile> images = await _picker.pickMultiImage();
+                if (images.isNotEmpty) {
+                  _processImagesQueue(images);
+                }
               },
             ),
           ],
@@ -85,217 +119,215 @@ class _ScanHomePageState extends State<ScanHomePage> {
     );
   }
 
-  // 相機拍攝單張
-  Future<void> _captureFromCamera() async {
-    final XFile? photo = await _picker.pickImage(source: ImageSource.camera);
-    if (photo != null) {
-      await _uploadAndProcessImages([photo]);
-    }
-  }
-
-  // 相簿多選照片
-  Future<void> _pickMultipleImages() async {
-    final List<XFile> images = await _picker.pickMultiImage();
-    if (images.isNotEmpty) {
-      await _uploadAndProcessImages(images);
-    }
-  }
-
-  // 逐張上傳至後端進行辨識與存檔
-  Future<void> _uploadAndProcessImages(List<XFile> files) async {
+  // 關鍵佇列核心：循序處理每一張照片，徹底避免併發斷線
+  Future<void> _processImagesQueue(List<XFile> files) async {
     setState(() {
-      _isProcessing = true;
-      _statusMessage = '準備上傳...';
-      _scanResults.clear();
+      _isUploadingBatch = true;
     });
 
-    final String dateString = DateFormat('yyyy-MM-dd').format(_selectedDate);
+    for (final xfile in files) {
+      final fileName = xfile.name.isNotEmpty ? xfile.name : xfile.path.split('/').last;
+      final item = ScanItem(fileName: fileName, filePath: xfile.path);
 
-    for (int i = 0; i < files.length; i++) {
-      final file = files[i];
+      // 新增至頂部顯示
       setState(() {
-        _statusMessage = '正在辨識第 ${i + 1} / ${files.length} 張照片...';
+        _scanItems.insert(0, item);
       });
 
-      try {
-        var request = http.MultipartRequest('POST', Uri.parse(serverUrl));
-        request.fields['archive_date'] = dateString;
-        request.files.add(await http.MultipartFile.fromPath('file', file.path));
-
-        var streamedResponse = await request.send();
-        var response = await http.Response.fromStream(streamedResponse);
-
-        if (response.statusCode == 200) {
-          final resJson = jsonDecode(utf8.decode(response.bodyBytes));
-          final bool isSuccess = resJson['success'] == true;
-
-          _scanResults.add({
-            'file': file.name,
-            'status': isSuccess ? '成功' : '失敗',
-            'data': resJson['data'],
-            'error': resJson['error'] ?? '',
-          });
-        } else {
-          _scanResults.add({
-            'file': file.name,
-            'status': '失敗',
-            'data': null,
-            'error': 'HTTP ${response.statusCode}: ${response.body}',
-          });
-        }
-      } catch (e) {
-        _scanResults.add({
-          'file': file.name,
-          'status': '連線失敗',
-          'data': null,
-          'error': e.toString(),
-        });
-      }
+      // 逐張呼叫上傳與辨識
+      await _uploadSingleImage(item);
     }
 
     setState(() {
-      _isProcessing = false;
-      _statusMessage = '全數處理完成！共 ${files.length} 張';
+      _isUploadingBatch = false;
     });
+  }
+
+  // 單張上傳並帶有 90 秒逾時保護
+  Future<void> _uploadSingleImage(ScanItem item) async {
+    final archiveDateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
+
+    try {
+      final request = http.MultipartRequest('POST', Uri.parse(serverUrl));
+      request.fields['archive_date'] = archiveDateStr;
+      request.files.add(
+        await http.MultipartFile.fromPath('file', item.filePath),
+      );
+
+      // 設定 90 秒連線超時
+      final streamedResponse = await request.send().timeout(
+        const Duration(seconds: 90),
+        onTimeout: () {
+          throw http.ClientException('連線逾時 (90秒)，請檢查網路或稍後重試');
+        },
+      );
+
+      final response = await http.Response.fromStream(streamedResponse);
+
+      if (response.statusCode == 200) {
+        final resJson = json.decode(utf8.decode(response.bodyBytes));
+        if (resJson['success'] == true) {
+          setState(() {
+            item.isProcessing = false;
+            item.isSuccess = true;
+            item.data = resJson['data'];
+          });
+        } else {
+          setState(() {
+            item.isProcessing = false;
+            item.isSuccess = false;
+            item.errorMessage = resJson['error'] ?? '伺服器辨識失敗';
+          });
+        }
+      } else {
+        setState(() {
+          item.isProcessing = false;
+          item.isSuccess = false;
+          item.errorMessage = 'HTTP ${response.statusCode}: ${response.reasonPhrase}';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        item.isProcessing = false;
+        item.isSuccess = false;
+        item.errorMessage = e.toString();
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('企業掛號信掃描與歸檔'),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        title: const Text(
+          '企業掛號信掃描與歸檔',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 19),
+        ),
+        backgroundColor: const Color(0xFFD6BBFC),
+        elevation: 0,
+        centerTitle: false,
       ),
       body: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Column(
           children: [
-            // 日期選擇區塊
-            Card(
-              elevation: 2,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      '歸檔日期: ${DateFormat('yyyy-MM-dd').format(_selectedDate)}',
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            // 歸檔日期選擇器
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.04),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Text(
+                    '歸檔日期: $dateStr',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF2C3E50),
                     ),
-                    ElevatedButton.icon(
-                      onPressed: () => _selectDate(context),
-                      icon: const Icon(Icons.calendar_today, size: 18),
-                      label: const Text('選擇日期'),
+                  ),
+                  const Spacer(),
+                  InkWell(
+                    onTap: _pickDate,
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF1F0FA),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.calendar_today_outlined,
+                              size: 16, color: Color(0xFF5E35B1)),
+                          SizedBox(width: 6),
+                          Text(
+                            '選擇日期',
+                            style: TextStyle(
+                              color: Color(0xFF5E35B1),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            // 開啟相機/選取相片按鈕
+            InkWell(
+              onTap: _isUploadingBatch ? null : _pickAndProcessImages,
+              borderRadius: BorderRadius.circular(24),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                decoration: BoxDecoration(
+                  color: _isUploadingBatch
+                      ? Colors.grey.shade300
+                      : const Color(0xFFF1EBFB),
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(
+                    color: _isUploadingBatch
+                        ? Colors.grey.shade400
+                        : const Color(0xFFD6BBFC),
+                  ),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.camera_alt_outlined,
+                      color: _isUploadingBatch
+                          ? Colors.grey.shade600
+                          : const Color(0xFF5E35B1),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      _isUploadingBatch ? '正在批次處理中，請稍候...' : '開啟相機或選取信封照片',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: _isUploadingBatch
+                            ? Colors.grey.shade600
+                            : const Color(0xFF5E35B1),
+                      ),
                     ),
                   ],
                 ),
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
 
-            // 操作按鈕
-            SizedBox(
-              width: double.infinity,
-              height: 52,
-              child: ElevatedButton.icon(
-                onPressed: _isProcessing ? null : _showImageSourcePicker,
-                icon: const Icon(Icons.camera_alt),
-                label: Text(
-                  _isProcessing ? '正在辨識處理中...' : '開啟相機或選取信封照片',
-                  style: const TextStyle(fontSize: 16),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            // 進度指示條
-            if (_isProcessing) ...[
-              const LinearProgressIndicator(),
-              const SizedBox(height: 8),
-              Text(_statusMessage, style: const TextStyle(color: Colors.blueGrey, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 12),
-            ],
-
-            // 辨識結果清單
+            // 結果列表區
             Expanded(
-              child: _scanResults.isEmpty
-                  ? Center(child: Text(_statusMessage.isEmpty ? '尚無掃描資料' : _statusMessage))
+              child: _scanItems.isEmpty
+                  ? Center(
+                      child: Text(
+                        '尚未掃描任何信封',
+                        style: TextStyle(color: Colors.grey.shade500),
+                      ),
+                    )
                   : ListView.builder(
-                      itemCount: _scanResults.length,
-                      itemBuilder: (ctx, index) {
-                        final item = _scanResults[index];
-                        final bool isSuccess = item['status'] == '成功';
-                        final Map<String, dynamic>? info = item['data'];
-
-                        return Card(
-                          margin: const EdgeInsets.symmetric(vertical: 6),
-                          elevation: 2,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            side: BorderSide(
-                              color: isSuccess ? Colors.green.shade300 : Colors.red.shade300,
-                              width: 1.5,
-                            ),
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.all(14.0),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                // 頂部檔名與狀態標籤
-                                Row(
-                                  children: [
-                                    Icon(
-                                      isSuccess ? Icons.check_circle : Icons.error,
-                                      color: isSuccess ? Colors.green : Colors.red,
-                                      size: 20,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
-                                        item['file'],
-                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: isSuccess ? Colors.green.shade100 : Colors.red.shade100,
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                      child: Text(
-                                        item['status'],
-                                        style: TextStyle(
-                                          color: isSuccess ? Colors.green.shade800 : Colors.red.shade800,
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const Divider(height: 18),
-
-                                // 詳細辨識內容
-                                if (isSuccess && info != null) ...[
-                                  _buildInfoRow(Icons.person, '收件人', info['recipient'] ?? '無'),
-                                  const SizedBox(height: 6),
-                                  _buildInfoRow(Icons.business, '寄件人', info['sender'] ?? '無'),
-                                  const SizedBox(height: 6),
-                                  _buildInfoRow(Icons.confirmation_number, '掛號單號', info['mail_number'] ?? '無', isHighlight: true),
-                                  const SizedBox(height: 6),
-                                  _buildInfoRow(Icons.location_on, '收件地址', info['address'] ?? '無'),
-                                ] else ...[
-                                  Text(
-                                    '錯誤原因: ${item['error']}',
-                                    style: const TextStyle(color: Colors.redAccent, fontSize: 13),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                        );
+                      itemCount: _scanItems.length,
+                      itemBuilder: (context, index) {
+                        final item = _scanItems[index];
+                        return _buildItemCard(item);
                       },
                     ),
             ),
@@ -305,28 +337,203 @@ class _ScanHomePageState extends State<ScanHomePage> {
     );
   }
 
-  // 結構化單行顯示小工具
-  Widget _buildInfoRow(IconData icon, String label, String value, {bool isHighlight = false}) {
+  // 建立結果卡片（依據處理中、成功、失敗呈現對應配色）
+  Widget _buildItemCard(ScanItem item) {
+    if (item.isProcessing) {
+      return Card(
+        color: Colors.white,
+        margin: const EdgeInsets.only(bottom: 12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: Colors.purple.shade100),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2.5),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  '${item.fileName} 正在辨識與歸檔中...',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (item.isSuccess) {
+      final data = item.data ?? {};
+      return Card(
+        color: Colors.white,
+        margin: const EdgeInsets.only(bottom: 12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: Color(0xFF81C784), width: 1.5),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 頂部檔名與成功徽章
+              Row(
+                children: [
+                  const Icon(Icons.check_circle, color: Color(0xFF4CAF50), size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      item.fileName,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE8F5E9),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Text(
+                      '成功',
+                      style: TextStyle(
+                        color: Color(0xFF2E7D32),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const Divider(height: 20),
+
+              // 收件人
+              _buildDetailRow(
+                icon: Icons.person_outline,
+                label: '收件人',
+                value: data['recipient'] ?? '無',
+                isBold: true,
+              ),
+              const SizedBox(height: 6),
+
+              // 寄件人
+              _buildDetailRow(
+                icon: Icons.business_outlined,
+                label: '寄件人',
+                value: data['sender'] ?? '無',
+              ),
+              const SizedBox(height: 6),
+
+              // 掛號單號
+              _buildDetailRow(
+                icon: Icons.confirmation_number_outlined,
+                label: '掛號單號',
+                value: data['mail_number'] ?? '無',
+                valueColor: const Color(0xFF1565C0),
+                isBold: true,
+              ),
+              const SizedBox(height: 6),
+
+              // 收件地址
+              _buildDetailRow(
+                icon: Icons.location_on_outlined,
+                label: '收件地址',
+                value: data['address'] ?? '無',
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // 失敗狀態卡片
+    return Card(
+      color: const Color(0xFFFFF8F8),
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: Color(0xFFEF9A9A), width: 1.5),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.error, color: Color(0xFFE53935), size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    item.fileName,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFEBEE),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Text(
+                    '連線失敗',
+                    style: TextStyle(
+                      color: Color(0xFFC62828),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const Divider(height: 20),
+            Text(
+              '錯誤原因: ${item.errorMessage}',
+              style: const TextStyle(color: Color(0xFFD32F2F), fontSize: 13),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 輔助行排版
+  Widget _buildDetailRow({
+    required IconData icon,
+    required String label,
+    required String value,
+    Color? valueColor,
+    bool isBold = false,
+  }) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 18, color: isHighlight ? Colors.blueAccent : Colors.grey.shade700),
-        const SizedBox(width: 6),
+        Icon(icon, size: 17, color: Colors.grey.shade700),
+        const SizedBox(width: 8),
         Text(
           '$label: ',
           style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
             color: Colors.grey.shade800,
+            fontSize: 13.5,
+            fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
           ),
         ),
         Expanded(
           child: Text(
             value,
             style: TextStyle(
-              fontSize: 14,
-              fontWeight: isHighlight ? FontWeight.bold : FontWeight.normal,
-              color: isHighlight ? Colors.blue.shade900 : Colors.black87,
+              color: valueColor ?? const Color(0xFF2C3E50),
+              fontSize: 13.5,
+              fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
             ),
           ),
         ),
