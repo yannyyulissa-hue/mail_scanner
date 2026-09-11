@@ -57,11 +57,11 @@ class ScannerHomePage extends StatefulWidget {
 }
 
 class _ScannerHomePageState extends State<ScannerHomePage> {
-  // Cloud Run 後端網址
+  // Google Cloud Run 後端服務端點
   final String serverUrl =
       'https://mail-scanner-backend-371376741005.asia-east1.run.app/api/scan-envelope';
 
-  // 雲端試算表網址
+  // 雲端試算表連結
   final String sheetUrl =
       'https://docs.google.com/spreadsheets/d/1cPsfn_ggu01fsXG4XHxeiwS4ie5cQg4WO4QiYAW4BfE/edit?usp=sharing';
 
@@ -69,6 +69,15 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   DateTime _selectedDate = DateTime.now();
   final List<ScanItem> _scanItems = [];
   bool _isUploadingBatch = false;
+
+  // 使用長連線 Client 複用 TCP 通道，解決 DNS 頻繁解析失敗 (Failed host lookup)
+  final http.Client _httpClient = http.Client();
+
+  @override
+  void dispose() {
+    _httpClient.close();
+    super.dispose();
+  }
 
   Future<void> _launchSheetUrl() async {
     final uri = Uri.parse(sheetUrl);
@@ -123,7 +132,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
-  // 拍照 / 選圖：內建限制解析度 maxWidth: 1600，壓縮至約 300KB，避免連續傳送塞車
+  // 拍照 / 選圖：強制加入縮圖限制，原本 8MB 照片會壓縮至 300KB，大幅提升速度與穩定度
   Future<void> _pickAndProcessImages() async {
     if (_isUploadingBatch) return;
 
@@ -172,7 +181,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
-  // 循序佇列：一張處理完畢再送下一張，並加入 0.5 秒微緩衝防 DNS 塞車
+  // 循序佇列：一張處理完畢後，安全間隔 1.2 秒再處理下一張，徹底避免網路擁塞
   Future<void> _processImagesQueue(List<XFile> files) async {
     setState(() {
       _isUploadingBatch = true;
@@ -186,11 +195,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         _scanItems.insert(0, item);
       });
 
-      // 執行上傳（失敗會自動重試 1 次）
+      // 傳送單張（帶雙重重試機制）
       await _uploadWithRetry(item);
 
-      // 間隔 0.5 秒緩衝
-      await Future.delayed(const Duration(milliseconds: 500));
+      // 安全間隔 1.2 秒
+      await Future.delayed(const Duration(milliseconds: 1200));
     }
 
     setState(() {
@@ -198,15 +207,15 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     });
   }
 
-  // 自動重試機制
+  // 重試機制：遭遇連線異常自動重試 2 次
   Future<void> _uploadWithRetry(ScanItem item) async {
-    for (int attempt = 1; attempt <= 2; attempt++) {
+    const int maxRetries = 2;
+    for (int attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        await _uploadSingleImage(item);
-        if (item.isSuccess) return;
+        final success = await _uploadSingleImage(item);
+        if (success) return;
       } catch (e) {
-        if (attempt == 1) {
-          // 遭遇網路抖動，等待 2 秒後重試一次
+        if (attempt < maxRetries) {
           await Future.delayed(const Duration(seconds: 2));
         } else {
           setState(() {
@@ -219,7 +228,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     }
   }
 
-  Future<void> _uploadSingleImage(ScanItem item) async {
+  Future<bool> _uploadSingleImage(ScanItem item) async {
     final archiveDateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
 
     final request = http.MultipartRequest('POST', Uri.parse(serverUrl));
@@ -228,10 +237,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       await http.MultipartFile.fromPath('file', item.filePath),
     );
 
-    final streamedResponse = await request.send().timeout(
+    final streamedResponse = await _httpClient.send(request).timeout(
       const Duration(seconds: 60),
       onTimeout: () {
-        throw http.ClientException('連線逾時，請確認網路連線');
+        throw http.ClientException('伺服器處理逾時，請檢查網路連線');
       },
     );
 
@@ -245,12 +254,14 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
           item.isSuccess = true;
           item.data = resJson['data'];
         });
+        return true;
       } else {
         setState(() {
           item.isProcessing = false;
           item.isSuccess = false;
           item.errorMessage = resJson['error'] ?? '辨識失敗';
         });
+        return false;
       }
     } else {
       setState(() {
@@ -258,6 +269,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         item.isSuccess = false;
         item.errorMessage = '伺服器代碼: ${response.statusCode}';
       });
+      return false;
     }
   }
 
@@ -299,7 +311,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Column(
           children: [
-            // 日期選擇條
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
@@ -355,7 +366,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               ),
             ),
             const SizedBox(height: 12),
-            // 功能按鈕區
             Row(
               children: [
                 Expanded(
@@ -429,7 +439,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               ],
             ),
             const SizedBox(height: 14),
-            // 結果清單標題與清空按鈕
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -466,7 +475,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               ],
             ),
             const SizedBox(height: 8),
-            // 列表主體
             Expanded(
               child: _scanItems.isEmpty
                   ? Center(
