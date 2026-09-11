@@ -337,7 +337,6 @@ class _MailScannerViewState extends State<MailScannerView> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Column(
           children: [
-            // 日期選擇條
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
@@ -372,7 +371,6 @@ class _MailScannerViewState extends State<MailScannerView> {
               ),
             ),
             const SizedBox(height: 12),
-            // 按鈕區
             Row(
               children: [
                 Expanded(
@@ -594,8 +592,9 @@ class _DocScannerViewState extends State<DocScannerView> {
   final String docServerUrl =
       'https://mail-scanner-backend-371376741005.asia-east1.run.app/api/scan-official-doc';
 
+  // 💡 已更新為指定的公文登記簿 Google 試算表連結
   final String docSheetUrl =
-      'https://docs.google.com/spreadsheets/d/1cPsfn_ggu01fsXG4XHxeiwS4ie5cQg4WO4QiYAW4BfE/edit?usp=sharing';
+      'https://docs.google.com/spreadsheets/d/1JRaB8g6VCWo-5ohdCphfwFA1IcooxlmH3puizsVMej8/edit?usp=drive_link';
 
   final ImagePicker _picker = ImagePicker();
   DateTime _selectedDate = DateTime.now();
@@ -817,7 +816,6 @@ class _DocScannerViewState extends State<DocScannerView> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Column(
           children: [
-            // 日期選擇條（改為淺綠色系背景與綠色主題）
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
@@ -852,7 +850,6 @@ class _DocScannerViewState extends State<DocScannerView> {
               ),
             ),
             const SizedBox(height: 12),
-            // 主操作大按鈕（森林綠漸層）
             Row(
               children: [
                 Expanded(
@@ -1063,45 +1060,47 @@ class CorporateLogoWidget extends StatelessWidget {
     return SizedBox(
       width: size * 1.15,
       height: size,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            height: size * 0.52,
-            child: Container(
-              decoration: const BoxDecoration(
-                color: Color(0xFF00A0E9),
-                borderRadius: BorderRadius.all(Radius.elliptical(100, 50)),
+      child: {
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: size * 0.52,
+              child: Container(
+                decoration: const BoxDecoration(
+                  color: Color(0xFF00A0E9),
+                  borderRadius: BorderRadius.all(Radius.elliptical(100, 50)),
+                ),
               ),
             ),
-          ),
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            height: size * 0.52,
-            child: Container(
-              decoration: const BoxDecoration(
-                color: Color(0xFF009944),
-                borderRadius: BorderRadius.all(Radius.elliptical(100, 50)),
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              height: size * 0.52,
+              child: Container(
+                decoration: const BoxDecoration(
+                  color: Color(0xFF009944),
+                  borderRadius: BorderRadius.all(Radius.elliptical(100, 50)),
+                ),
               ),
             ),
-          ),
-          Text(
-            'H',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: size * 0.72,
-              fontWeight: FontWeight.w900,
-              fontFamily: 'serif',
-              height: 1.0,
+            Text(
+              'H',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: size * 0.72,
+                fontWeight: FontWeight.w900,
+                fontFamily: 'serif',
+                height: 1.0,
+              ),
             ),
-          ),
-        ],
-      ),
+          ],
+        );
+      }(),
     );
   }
 }
