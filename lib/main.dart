@@ -5,8 +5,10 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:wakelock_plus/wakelock_plus.dart'; // 引入防休眠套件
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const MailScannerApp());
 }
 
@@ -57,11 +59,9 @@ class ScannerHomePage extends StatefulWidget {
 }
 
 class _ScannerHomePageState extends State<ScannerHomePage> {
-  // Google Cloud Run 後端服務端點
   final String serverUrl =
       'https://mail-scanner-backend-371376741005.asia-east1.run.app/api/scan-envelope';
 
-  // 雲端試算表連結
   final String sheetUrl =
       'https://docs.google.com/spreadsheets/d/1cPsfn_ggu01fsXG4XHxeiwS4ie5cQg4WO4QiYAW4BfE/edit?usp=sharing';
 
@@ -70,12 +70,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   final List<ScanItem> _scanItems = [];
   bool _isUploadingBatch = false;
 
-  // 使用長連線 Client 複用 TCP 通道，解決 DNS 頻繁解析失敗 (Failed host lookup)
   final http.Client _httpClient = http.Client();
 
   @override
   void dispose() {
     _httpClient.close();
+    WakelockPlus.disable(); // 頁面關閉時確保解除螢幕常亮
     super.dispose();
   }
 
@@ -132,7 +132,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
-  // 拍照 / 選圖：強制加入縮圖限制，原本 8MB 照片會壓縮至 300KB，大幅提升速度與穩定度
   Future<void> _pickAndProcessImages() async {
     if (_isUploadingBatch) return;
 
@@ -181,33 +180,45 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
-  // 循序佇列：一張處理完畢後，安全間隔 1.2 秒再處理下一張，徹底避免網路擁塞
+  // 循序佇列處理（加入自動防休眠）
   Future<void> _processImagesQueue(List<XFile> files) async {
     setState(() {
       _isUploadingBatch = true;
     });
 
-    for (final xfile in files) {
-      final fileName = xfile.name.isNotEmpty ? xfile.name : xfile.path.split('/').last;
-      final item = ScanItem(fileName: fileName, filePath: xfile.path);
+    // 💡 啟用螢幕常亮：防止平板逾時鎖定或休眠切斷網路
+    try {
+      await WakelockPlus.enable();
+    } catch (_) {}
+
+    try {
+      for (final xfile in files) {
+        final fileName = xfile.name.isNotEmpty ? xfile.name : xfile.path.split('/').last;
+        final item = ScanItem(fileName: fileName, filePath: xfile.path);
+
+        setState(() {
+          _scanItems.insert(0, item);
+        });
+
+        // 傳送單張（帶自動重試）
+        await _uploadWithRetry(item);
+
+        // 安全間隔 1.2 秒
+        await Future.delayed(const Duration(milliseconds: 1200));
+      }
+    } finally {
+      // 💡 全數完成後：解除螢幕常亮，恢復平板原有的省電休眠機制
+      try {
+        await WakelockPlus.disable();
+      } catch (_) {}
 
       setState(() {
-        _scanItems.insert(0, item);
+        _isUploadingBatch = false;
       });
-
-      // 傳送單張（帶雙重重試機制）
-      await _uploadWithRetry(item);
-
-      // 安全間隔 1.2 秒
-      await Future.delayed(const Duration(milliseconds: 1200));
     }
-
-    setState(() {
-      _isUploadingBatch = false;
-    });
   }
 
-  // 重試機制：遭遇連線異常自動重試 2 次
+  // 重試機制
   Future<void> _uploadWithRetry(ScanItem item) async {
     const int maxRetries = 2;
     for (int attempt = 1; attempt <= maxRetries; attempt++) {
@@ -311,6 +322,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Column(
           children: [
+            // 日期選擇條
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
@@ -366,6 +378,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               ),
             ),
             const SizedBox(height: 12),
+            // 操作按鈕區
             Row(
               children: [
                 Expanded(
@@ -377,7 +390,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       decoration: BoxDecoration(
                         gradient: _isUploadingBatch
-                            ? LinearGradient(colors: [Colors.grey.shade400, Colors.grey.shade500])
+                            ? LinearGradient(colors: [Colors.grey.shade500, Colors.grey.shade600])
                             : const LinearGradient(
                                 colors: [Color(0xFF1976D2), Color(0xFF0D47A1)],
                                 begin: Alignment.topLeft,
@@ -396,15 +409,15 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(
-                            _isUploadingBatch ? Icons.hourglass_top : Icons.camera_alt,
+                            _isUploadingBatch ? Icons.wb_sunny_outlined : Icons.camera_alt,
                             color: Colors.white,
                             size: 20,
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            _isUploadingBatch ? '辨識進行中...' : '拍攝 / 選取信封照片',
+                            _isUploadingBatch ? '歸檔中 (防休眠保護已啟動)' : '拍攝 / 選取信封照片',
                             style: const TextStyle(
-                              fontSize: 14.5,
+                              fontSize: 14,
                               fontWeight: FontWeight.bold,
                               color: Colors.white,
                             ),
@@ -439,6 +452,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               ],
             ),
             const SizedBox(height: 14),
+            // 結果清單標題與清空按鈕
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -475,6 +489,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               ],
             ),
             const SizedBox(height: 8),
+            // 列表主體
             Expanded(
               child: _scanItems.isEmpty
                   ? Center(
