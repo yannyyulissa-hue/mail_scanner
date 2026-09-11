@@ -73,7 +73,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
           ),
           NavigationDestination(
             icon: Icon(Icons.history_edu_outlined),
-            selectedIcon: Icon(Icons.history_edu, color: Color(0xFFC62828)),
+            selectedIcon: Icon(Icons.history_edu, color: Color(0xFF2E7D32)),
             label: '公文函文收文',
           ),
         ],
@@ -83,7 +83,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
 }
 
 // =============================================================
-// 分頁一：掛號信件歸檔 (MailScannerView)
+// 分頁一：掛號信件歸檔 (MailScannerView - 藍色系)
 // =============================================================
 class MailItem {
   final String fileName;
@@ -372,7 +372,7 @@ class _MailScannerViewState extends State<MailScannerView> {
               ),
             ),
             const SizedBox(height: 12),
-            // 按鈕
+            // 按鈕區
             Row(
               children: [
                 Expanded(
@@ -563,7 +563,7 @@ class _MailScannerViewState extends State<MailScannerView> {
 }
 
 // =============================================================
-// 分頁二：公文函文收文 (DocScannerView)
+// 分頁二：公文函文收文 (DocScannerView - 綠色系)
 // =============================================================
 class DocItem {
   final String fileName;
@@ -591,11 +591,9 @@ class DocScannerView extends StatefulWidget {
 }
 
 class _DocScannerViewState extends State<DocScannerView> {
-  // 💡 後端公文端點 (若在同一 Cloud Run，只需切換路由為 /api/scan-official-doc)
   final String docServerUrl =
       'https://mail-scanner-backend-371376741005.asia-east1.run.app/api/scan-official-doc';
 
-  // 💡 請更換為您的公文登記簿 Google 試算表網址
   final String docSheetUrl =
       'https://docs.google.com/spreadsheets/d/1cPsfn_ggu01fsXG4XHxeiwS4ie5cQg4WO4QiYAW4BfE/edit?usp=sharing';
 
@@ -647,7 +645,7 @@ class _DocScannerViewState extends State<DocScannerView> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC62828)),
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
             onPressed: () {
               setState(() => _items.clear());
               Navigator.pop(ctx);
@@ -671,7 +669,7 @@ class _DocScannerViewState extends State<DocScannerView> {
         child: Wrap(
           children: [
             ListTile(
-              leading: const Icon(Icons.camera_alt_outlined, color: Color(0xFFC62828)),
+              leading: const Icon(Icons.camera_alt_outlined, color: Color(0xFF2E7D32)),
               title: const Text('拍攝公文首頁', style: TextStyle(fontWeight: FontWeight.w600)),
               onTap: () async {
                 Navigator.pop(ctx);
@@ -685,7 +683,7 @@ class _DocScannerViewState extends State<DocScannerView> {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined, color: Color(0xFFC62828)),
+              leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF2E7D32)),
               title: const Text('從相簿選取（支援多選）', style: TextStyle(fontWeight: FontWeight.w600)),
               onTap: () async {
                 Navigator.pop(ctx);
@@ -794,12 +792,12 @@ class _DocScannerViewState extends State<DocScannerView> {
         titleSpacing: 12,
         title: const Row(
           children: [
-            Icon(Icons.history_edu_rounded, color: Color(0xFFC62828), size: 28),
+            Icon(Icons.history_edu_rounded, color: Color(0xFF2E7D32), size: 28),
             SizedBox(width: 10),
             Expanded(
               child: Text(
                 '公文函文收文登記簿',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: Color(0xFFB71C1C)),
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: Color(0xFF1B5E20)),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -819,7 +817,7 @@ class _DocScannerViewState extends State<DocScannerView> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Column(
           children: [
-            // 日期選擇條
+            // 日期選擇條（改為淺綠色系背景與綠色主題）
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
@@ -831,7 +829,7 @@ class _DocScannerViewState extends State<DocScannerView> {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.calendar_today_outlined, color: Color(0xFFC62828), size: 20),
+                  const Icon(Icons.calendar_today_outlined, color: Color(0xFF2E7D32), size: 20),
                   const SizedBox(width: 8),
                   Text('受月日 (收文日): $dateStr', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
                   const Spacer(),
@@ -840,12 +838,12 @@ class _DocScannerViewState extends State<DocScannerView> {
                     borderRadius: BorderRadius.circular(12),
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(color: const Color(0xFFFFEBEE), borderRadius: BorderRadius.circular(12)),
+                      decoration: BoxDecoration(color: const Color(0xFFE8F5E9), borderRadius: BorderRadius.circular(12)),
                       child: const Row(
                         children: [
-                          Icon(Icons.edit_calendar, size: 15, color: Color(0xFFC62828)),
+                          Icon(Icons.edit_calendar, size: 15, color: Color(0xFF2E7D32)),
                           SizedBox(width: 4),
-                          Text('選擇日期', style: TextStyle(color: Color(0xFFC62828), fontSize: 12.5, fontWeight: FontWeight.bold)),
+                          Text('選擇日期', style: TextStyle(color: Color(0xFF2E7D32), fontSize: 12.5, fontWeight: FontWeight.bold)),
                         ],
                       ),
                     ),
@@ -854,7 +852,7 @@ class _DocScannerViewState extends State<DocScannerView> {
               ),
             ),
             const SizedBox(height: 12),
-            // 按鈕
+            // 主操作大按鈕（森林綠漸層）
             Row(
               children: [
                 Expanded(
@@ -867,8 +865,15 @@ class _DocScannerViewState extends State<DocScannerView> {
                       decoration: BoxDecoration(
                         gradient: _isUploadingBatch
                             ? LinearGradient(colors: [Colors.grey.shade500, Colors.grey.shade600])
-                            : const LinearGradient(colors: [Color(0xFFD32F2F), Color(0xFFB71C1C)]),
+                            : const LinearGradient(colors: [Color(0xFF2E7D32), Color(0xFF1B5E20)]),
                         borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF2E7D32).withOpacity(0.25),
+                            blurRadius: 8,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -913,9 +918,9 @@ class _DocScannerViewState extends State<DocScannerView> {
                     onTap: _isUploadingBatch ? null : _clearItems,
                     child: const Row(
                       children: [
-                        Icon(Icons.delete_sweep_outlined, size: 17, color: Color(0xFFD32F2F)),
+                        Icon(Icons.delete_sweep_outlined, size: 17, color: Color(0xFF2E7D32)),
                         SizedBox(width: 4),
-                        Text('清空列表', style: TextStyle(color: Color(0xFFD32F2F), fontSize: 13, fontWeight: FontWeight.w600)),
+                        Text('清空列表', style: TextStyle(color: Color(0xFF2E7D32), fontSize: 13, fontWeight: FontWeight.w600)),
                       ],
                     ),
                   ),
@@ -955,7 +960,7 @@ class _DocScannerViewState extends State<DocScannerView> {
           padding: const EdgeInsets.all(16),
           child: Row(
             children: [
-              const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5, color: Color(0xFFC62828))),
+              const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5, color: Color(0xFF2E7D32))),
               const SizedBox(width: 14),
               Expanded(child: Text('${item.fileName} 正在提取公文資料並登記...')),
             ],
@@ -997,7 +1002,7 @@ class _DocScannerViewState extends State<DocScannerView> {
               const SizedBox(height: 6),
               _buildRow(Icons.category_outlined, '文別', d['doc_type'] ?? '函'),
               const SizedBox(height: 6),
-              _buildRow(Icons.tag, '發文字號', d['doc_number'] ?? '無', valueColor: const Color(0xFF1565C0), isHighlight: true),
+              _buildRow(Icons.tag, '發文字號', d['doc_number'] ?? '無', valueColor: const Color(0xFF2E7D32), isHighlight: true),
               const SizedBox(height: 6),
               _buildRow(Icons.subject, '事由 / 主旨', d['subject'] ?? '無', valueColor: const Color(0xFF37474F)),
               const SizedBox(height: 6),
