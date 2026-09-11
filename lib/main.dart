@@ -5,35 +5,87 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:wakelock_plus/wakelock_plus.dart'; // 引入防休眠套件
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const MailScannerApp());
+  runApp(const UnifiedScannerApp());
 }
 
-class MailScannerApp extends StatelessWidget {
-  const MailScannerApp({super.key});
+class UnifiedScannerApp extends StatelessWidget {
+  const UnifiedScannerApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '台中營業處掛號信掃描與歸檔',
+      title: '台中營業處文書歸檔系統',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF1E88E5),
+          seedColor: const Color(0xFF1976D2),
           primary: const Color(0xFF1976D2),
         ),
         useMaterial3: true,
         scaffoldBackgroundColor: const Color(0xFFF4F6F9),
       ),
-      home: const ScannerHomePage(),
+      home: const MainNavigationShell(),
     );
   }
 }
 
-class ScanItem {
+// -------------------------------------------------------------
+// 主畫面底層框架（底部導航切換）
+// -------------------------------------------------------------
+class MainNavigationShell extends StatefulWidget {
+  const MainNavigationShell({super.key});
+
+  @override
+  State<MainNavigationShell> createState() => _MainNavigationShellState();
+}
+
+class _MainNavigationShellState extends State<MainNavigationShell> {
+  int _currentIndex = 0;
+
+  final List<Widget> _pages = const [
+    MailScannerView(),
+    DocScannerView(),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: IndexedStack(
+        index: _currentIndex,
+        children: _pages,
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _currentIndex,
+        onDestinationSelected: (int index) {
+          setState(() {
+            _currentIndex = index;
+          });
+        },
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.mark_email_read_outlined),
+            selectedIcon: Icon(Icons.mark_email_read, color: Color(0xFF1976D2)),
+            label: '掛號信件歸檔',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.history_edu_outlined),
+            selectedIcon: Icon(Icons.history_edu, color: Color(0xFFC62828)),
+            label: '公文函文收文',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// =============================================================
+// 分頁一：掛號信件歸檔 (MailScannerView)
+// =============================================================
+class MailItem {
   final String fileName;
   final String filePath;
   bool isProcessing;
@@ -41,7 +93,7 @@ class ScanItem {
   String? errorMessage;
   Map<String, dynamic>? data;
 
-  ScanItem({
+  MailItem({
     required this.fileName,
     required this.filePath,
     this.isProcessing = true,
@@ -51,14 +103,14 @@ class ScanItem {
   });
 }
 
-class ScannerHomePage extends StatefulWidget {
-  const ScannerHomePage({super.key});
+class MailScannerView extends StatefulWidget {
+  const MailScannerView({super.key});
 
   @override
-  State<ScannerHomePage> createState() => _ScannerHomePageState();
+  State<MailScannerView> createState() => _MailScannerViewState();
 }
 
-class _ScannerHomePageState extends State<ScannerHomePage> {
+class _MailScannerViewState extends State<MailScannerView> {
   final String serverUrl =
       'https://mail-scanner-backend-371376741005.asia-east1.run.app/api/scan-envelope';
 
@@ -67,15 +119,14 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
 
   final ImagePicker _picker = ImagePicker();
   DateTime _selectedDate = DateTime.now();
-  final List<ScanItem> _scanItems = [];
+  final List<MailItem> _items = [];
   bool _isUploadingBatch = false;
-
   final http.Client _httpClient = http.Client();
 
   @override
   void dispose() {
     _httpClient.close();
-    WakelockPlus.disable(); // 頁面關閉時確保解除螢幕常亮
+    WakelockPlus.disable();
     super.dispose();
   }
 
@@ -105,24 +156,18 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
   }
 
   void _clearItems() {
-    if (_scanItems.isEmpty) return;
-
+    if (_items.isEmpty) return;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('確認清空', style: TextStyle(fontWeight: FontWeight.bold)),
-        content: const Text('確定要清除畫面上所有的掃描記錄卡片嗎？\n（已寫入雲端試算表的資料不會被刪除）'),
+        content: const Text('確定要清除畫面上的信件掃描卡片嗎？\n（已寫入試算表的紀錄不會受影響）'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade600),
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF1976D2)),
             onPressed: () {
-              setState(() {
-                _scanItems.clear();
-              });
+              setState(() => _items.clear());
               Navigator.pop(ctx);
             },
             child: const Text('確定清空'),
@@ -154,14 +199,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   maxHeight: 1600,
                   imageQuality: 85,
                 );
-                if (photo != null) {
-                  _processImagesQueue([photo]);
-                }
+                if (photo != null) _processQueue([photo]);
               },
             ),
             ListTile(
               leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF1976D2)),
-              title: const Text('從相簿選擇（支援多選）', style: TextStyle(fontWeight: FontWeight.w600)),
+              title: const Text('從相簿選取（支援多選）', style: TextStyle(fontWeight: FontWeight.w600)),
               onTap: () async {
                 Navigator.pop(ctx);
                 final List<XFile> images = await _picker.pickMultiImage(
@@ -169,9 +212,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                   maxHeight: 1600,
                   imageQuality: 85,
                 );
-                if (images.isNotEmpty) {
-                  _processImagesQueue(images);
-                }
+                if (images.isNotEmpty) _processQueue(images);
               },
             ),
           ],
@@ -180,13 +221,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
-  // 循序佇列處理（加入自動防休眠）
-  Future<void> _processImagesQueue(List<XFile> files) async {
-    setState(() {
-      _isUploadingBatch = true;
-    });
-
-    // 💡 啟用螢幕常亮：防止平板逾時鎖定或休眠切斷網路
+  Future<void> _processQueue(List<XFile> files) async {
+    setState(() => _isUploadingBatch = true);
     try {
       await WakelockPlus.enable();
     } catch (_) {}
@@ -194,36 +230,25 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     try {
       for (final xfile in files) {
         final fileName = xfile.name.isNotEmpty ? xfile.name : xfile.path.split('/').last;
-        final item = ScanItem(fileName: fileName, filePath: xfile.path);
+        final item = MailItem(fileName: fileName, filePath: xfile.path);
+        setState(() => _items.insert(0, item));
 
-        setState(() {
-          _scanItems.insert(0, item);
-        });
-
-        // 傳送單張（帶自動重試）
         await _uploadWithRetry(item);
-
-        // 安全間隔 1.2 秒
         await Future.delayed(const Duration(milliseconds: 1200));
       }
     } finally {
-      // 💡 全數完成後：解除螢幕常亮，恢復平板原有的省電休眠機制
       try {
         await WakelockPlus.disable();
       } catch (_) {}
-
-      setState(() {
-        _isUploadingBatch = false;
-      });
+      setState(() => _isUploadingBatch = false);
     }
   }
 
-  // 重試機制
-  Future<void> _uploadWithRetry(ScanItem item) async {
+  Future<void> _uploadWithRetry(MailItem item) async {
     const int maxRetries = 2;
     for (int attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        final success = await _uploadSingleImage(item);
+        final success = await _uploadSingle(item);
         if (success) return;
       } catch (e) {
         if (attempt < maxRetries) {
@@ -239,38 +264,32 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     }
   }
 
-  Future<bool> _uploadSingleImage(ScanItem item) async {
+  Future<bool> _uploadSingle(MailItem item) async {
     final archiveDateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
-
     final request = http.MultipartRequest('POST', Uri.parse(serverUrl));
     request.fields['archive_date'] = archiveDateStr;
-    request.files.add(
-      await http.MultipartFile.fromPath('file', item.filePath),
-    );
+    request.files.add(await http.MultipartFile.fromPath('file', item.filePath));
 
-    final streamedResponse = await _httpClient.send(request).timeout(
+    final streamed = await _httpClient.send(request).timeout(
       const Duration(seconds: 60),
-      onTimeout: () {
-        throw http.ClientException('伺服器處理逾時，請檢查網路連線');
-      },
+      onTimeout: () => throw http.ClientException('連線逾時，請檢查網路'),
     );
+    final res = await http.Response.fromStream(streamed);
 
-    final response = await http.Response.fromStream(streamedResponse);
-
-    if (response.statusCode == 200) {
-      final resJson = json.decode(utf8.decode(response.bodyBytes));
-      if (resJson['success'] == true) {
+    if (res.statusCode == 200) {
+      final jsonMap = json.decode(utf8.decode(res.bodyBytes));
+      if (jsonMap['success'] == true) {
         setState(() {
           item.isProcessing = false;
           item.isSuccess = true;
-          item.data = resJson['data'];
+          item.data = jsonMap['data'];
         });
         return true;
       } else {
         setState(() {
           item.isProcessing = false;
           item.isSuccess = false;
-          item.errorMessage = resJson['error'] ?? '辨識失敗';
+          item.errorMessage = jsonMap['error'] ?? '辨識失敗';
         });
         return false;
       }
@@ -278,7 +297,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
       setState(() {
         item.isProcessing = false;
         item.isSuccess = false;
-        item.errorMessage = '伺服器代碼: ${response.statusCode}';
+        item.errorMessage = '伺服器代碼: ${res.statusCode}';
       });
       return false;
     }
@@ -297,12 +316,8 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
             const SizedBox(width: 10),
             const Expanded(
               child: Text(
-                '台中營業處掛號信掃描與歸檔',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 17,
-                  color: Color(0xFF1A237E),
-                ),
+                '台中營業處掛號信歸檔',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: Color(0xFF1A237E)),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -312,7 +327,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         elevation: 0.8,
         actions: [
           IconButton(
-            tooltip: '開啟雲端試算表',
+            tooltip: '開啟掛號信試算表',
             icon: const Icon(Icons.table_chart, color: Color(0xFF2E7D32)),
             onPressed: _launchSheetUrl,
           ),
@@ -329,47 +344,26 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(16),
                 boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.04),
-                    blurRadius: 10,
-                    offset: const Offset(0, 3),
-                  ),
+                  BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 3)),
                 ],
               ),
               child: Row(
                 children: [
                   const Icon(Icons.event_note, color: Color(0xFF1976D2), size: 20),
                   const SizedBox(width: 8),
-                  Text(
-                    '歸檔日期: $dateStr',
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF37474F),
-                    ),
-                  ),
+                  Text('歸檔日期: $dateStr', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
                   const Spacer(),
                   InkWell(
                     onTap: _pickDate,
                     borderRadius: BorderRadius.circular(12),
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFE3F2FD),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
+                      decoration: BoxDecoration(color: const Color(0xFFE3F2FD), borderRadius: BorderRadius.circular(12)),
                       child: const Row(
                         children: [
                           Icon(Icons.calendar_month, size: 15, color: Color(0xFF1976D2)),
                           SizedBox(width: 4),
-                          Text(
-                            '選擇日期',
-                            style: TextStyle(
-                              color: Color(0xFF1976D2),
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
+                          Text('選擇日期', style: TextStyle(color: Color(0xFF1976D2), fontSize: 12.5, fontWeight: FontWeight.bold)),
                         ],
                       ),
                     ),
@@ -378,7 +372,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               ),
             ),
             const SizedBox(height: 12),
-            // 操作按鈕區
+            // 按鈕
             Row(
               children: [
                 Expanded(
@@ -391,36 +385,17 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                       decoration: BoxDecoration(
                         gradient: _isUploadingBatch
                             ? LinearGradient(colors: [Colors.grey.shade500, Colors.grey.shade600])
-                            : const LinearGradient(
-                                colors: [Color(0xFF1976D2), Color(0xFF0D47A1)],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
+                            : const LinearGradient(colors: [Color(0xFF1976D2), Color(0xFF0D47A1)]),
                         borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: const Color(0xFF1976D2).withOpacity(0.25),
-                            blurRadius: 8,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(
-                            _isUploadingBatch ? Icons.wb_sunny_outlined : Icons.camera_alt,
-                            color: Colors.white,
-                            size: 20,
-                          ),
+                          Icon(_isUploadingBatch ? Icons.wb_sunny_outlined : Icons.camera_alt, color: Colors.white, size: 20),
                           const SizedBox(width: 8),
                           Text(
-                            _isUploadingBatch ? '歸檔中 (防休眠保護已啟動)' : '拍攝 / 選取信封照片',
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
+                            _isUploadingBatch ? '歸檔中 (防休眠常亮保護)' : '拍攝 / 選取信封照片',
+                            style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold, color: Colors.white),
                           ),
                         ],
                       ),
@@ -440,77 +415,46 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(color: const Color(0xFFA5D6A7)),
                       ),
-                      child: const Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.open_in_new, color: Color(0xFF2E7D32), size: 20),
-                        ],
-                      ),
+                      child: const Icon(Icons.open_in_new, color: Color(0xFF2E7D32), size: 20),
                     ),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 14),
-            // 結果清單標題與清空按鈕
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  '掃描結果 (${_scanItems.length})',
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF546E7A),
-                  ),
-                ),
-                if (_scanItems.isNotEmpty)
+                Text('掃描結果 (${_items.length})', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF546E7A))),
+                if (_items.isNotEmpty)
                   InkWell(
                     onTap: _isUploadingBatch ? null : _clearItems,
-                    borderRadius: BorderRadius.circular(8),
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      child: Row(
-                        children: [
-                          Icon(Icons.delete_sweep_outlined, size: 17, color: Color(0xFFD32F2F)),
-                          SizedBox(width: 4),
-                          Text(
-                            '清空記錄',
-                            style: TextStyle(
-                              color: Color(0xFFD32F2F),
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.delete_sweep_outlined, size: 17, color: Color(0xFFD32F2F)),
+                        SizedBox(width: 4),
+                        Text('清空列表', style: TextStyle(color: Color(0xFFD32F2F), fontSize: 13, fontWeight: FontWeight.w600)),
+                      ],
                     ),
                   ),
               ],
             ),
             const SizedBox(height: 8),
-            // 列表主體
             Expanded(
-              child: _scanItems.isEmpty
+              child: _items.isEmpty
                   ? Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.mark_email_read_outlined,
-                              size: 64, color: Colors.grey.shade400),
+                          Icon(Icons.mark_email_read_outlined, size: 64, color: Colors.grey.shade400),
                           const SizedBox(height: 12),
-                          Text(
-                            '點擊上方按鈕開始掃描信封',
-                            style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
-                          ),
+                          Text('點擊上方按鈕拍攝或選擇信封', style: TextStyle(color: Colors.grey.shade600)),
                         ],
                       ),
                     )
                   : ListView.builder(
-                      itemCount: _scanItems.length,
-                      itemBuilder: (context, index) {
-                        return _buildItemCard(_scanItems[index]);
-                      },
+                      itemCount: _items.length,
+                      itemBuilder: (ctx, i) => _buildMailCard(_items[i]),
                     ),
             ),
           ],
@@ -519,32 +463,19 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
-  Widget _buildItemCard(ScanItem item) {
+  Widget _buildMailCard(MailItem item) {
     if (item.isProcessing) {
       return Card(
         color: Colors.white,
         margin: const EdgeInsets.only(bottom: 12),
-        elevation: 1,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: Colors.blue.shade100),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Row(
             children: [
-              const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2.5),
-              ),
+              const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5)),
               const SizedBox(width: 14),
-              Expanded(
-                child: Text(
-                  '${item.fileName} 正在辨識並同步試算表...',
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
-                ),
-              ),
+              Expanded(child: Text('${item.fileName} 正在辨識歸檔...')),
             ],
           ),
         ),
@@ -552,11 +483,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     }
 
     if (item.isSuccess) {
-      final data = item.data ?? {};
+      final d = item.data ?? {};
       return Card(
         color: Colors.white,
         margin: const EdgeInsets.only(bottom: 12),
-        elevation: 1.5,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
           side: const BorderSide(color: Color(0xFFA5D6A7), width: 1.2),
@@ -570,43 +500,22 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
                 children: [
                   const Icon(Icons.check_circle_rounded, color: Color(0xFF2E7D32), size: 20),
                   const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      item.fileName,
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14.5),
-                    ),
-                  ),
+                  Expanded(child: Text(item.fileName, style: const TextStyle(fontWeight: FontWeight.bold))),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFE8F5E9),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Text(
-                      '已歸檔',
-                      style: TextStyle(
-                        color: Color(0xFF2E7D32),
-                        fontWeight: FontWeight.bold,
-                        fontSize: 11.5,
-                      ),
-                    ),
+                    decoration: BoxDecoration(color: const Color(0xFFE8F5E9), borderRadius: BorderRadius.circular(8)),
+                    child: const Text('已歸檔', style: TextStyle(color: Color(0xFF2E7D32), fontWeight: FontWeight.bold, fontSize: 11.5)),
                   ),
                 ],
               ),
               const Divider(height: 20),
-              _buildDetailRow(Icons.person, '收件人', data['recipient'] ?? '無', isHighlight: true),
+              _buildRow(Icons.person, '收件人', d['recipient'] ?? '無', isHighlight: true),
               const SizedBox(height: 6),
-              _buildDetailRow(Icons.corporate_fare, '寄件人', data['sender'] ?? '無'),
+              _buildRow(Icons.corporate_fare, '寄件人', d['sender'] ?? '無'),
               const SizedBox(height: 6),
-              _buildDetailRow(
-                Icons.tag,
-                '掛號單號',
-                data['mail_number'] ?? '無',
-                valueColor: const Color(0xFF1565C0),
-                isHighlight: true,
-              ),
+              _buildRow(Icons.tag, '掛號單號', d['mail_number'] ?? '無', valueColor: const Color(0xFF1565C0), isHighlight: true),
               const SizedBox(height: 6),
-              _buildDetailRow(Icons.place_outlined, '收件地址', data['address'] ?? '無'),
+              _buildRow(Icons.place_outlined, '收件地址', d['address'] ?? '無'),
             ],
           ),
         ),
@@ -616,7 +525,6 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     return Card(
       color: const Color(0xFFFFFBFB),
       margin: const EdgeInsets.only(bottom: 12),
-      elevation: 1,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
         side: const BorderSide(color: Color(0xFFFFCDD2), width: 1.2),
@@ -630,33 +538,164 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               children: [
                 const Icon(Icons.error_outline, color: Color(0xFFC62828), size: 20),
                 const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    item.fileName,
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFEBEE),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Text(
-                    '連線失敗',
-                    style: TextStyle(
-                      color: Color(0xFFC62828),
-                      fontWeight: FontWeight.bold,
-                      fontSize: 11.5,
-                    ),
-                  ),
-                ),
+                Expanded(child: Text(item.fileName, style: const TextStyle(fontWeight: FontWeight.bold))),
               ],
             ),
             const Divider(height: 20),
-            Text(
-              '錯誤原因: ${item.errorMessage}',
-              style: const TextStyle(color: Color(0xFFC62828), fontSize: 12.5),
+            Text('錯誤: ${item.errorMessage}', style: const TextStyle(color: Color(0xFFC62828), fontSize: 12)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRow(IconData icon, String label, String value, {Color? valueColor, bool isHighlight = false}) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 16, color: Colors.blueGrey.shade600),
+        const SizedBox(width: 6),
+        Text('$label: ', style: TextStyle(fontWeight: isHighlight ? FontWeight.bold : FontWeight.normal)),
+        Expanded(child: Text(value, style: TextStyle(color: valueColor, fontWeight: isHighlight ? FontWeight.bold : FontWeight.normal))),
+      ],
+    );
+  }
+}
+
+// =============================================================
+// 分頁二：公文函文收文 (DocScannerView)
+// =============================================================
+class DocItem {
+  final String fileName;
+  final String filePath;
+  bool isProcessing;
+  bool isSuccess;
+  String? errorMessage;
+  Map<String, dynamic>? data;
+
+  DocItem({
+    required this.fileName,
+    required this.filePath,
+    this.isProcessing = true,
+    this.isSuccess = false,
+    this.errorMessage,
+    this.data,
+  });
+}
+
+class DocScannerView extends StatefulWidget {
+  const DocScannerView({super.key});
+
+  @override
+  State<DocScannerView> createState() => _DocScannerViewState();
+}
+
+class _DocScannerViewState extends State<DocScannerView> {
+  // 💡 後端公文端點 (若在同一 Cloud Run，只需切換路由為 /api/scan-official-doc)
+  final String docServerUrl =
+      'https://mail-scanner-backend-371376741005.asia-east1.run.app/api/scan-official-doc';
+
+  // 💡 請更換為您的公文登記簿 Google 試算表網址
+  final String docSheetUrl =
+      'https://docs.google.com/spreadsheets/d/1cPsfn_ggu01fsXG4XHxeiwS4ie5cQg4WO4QiYAW4BfE/edit?usp=sharing';
+
+  final ImagePicker _picker = ImagePicker();
+  DateTime _selectedDate = DateTime.now();
+  final List<DocItem> _items = [];
+  bool _isUploadingBatch = false;
+  final http.Client _httpClient = http.Client();
+
+  @override
+  void dispose() {
+    _httpClient.close();
+    WakelockPlus.disable();
+    super.dispose();
+  }
+
+  Future<void> _launchSheetUrl() async {
+    final uri = Uri.parse(docSheetUrl);
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('無法開啟公文登記簿網址')),
+        );
+      }
+    }
+  }
+
+  Future<void> _pickDate() async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2035),
+    );
+    if (picked != null && picked != _selectedDate) {
+      setState(() {
+        _selectedDate = picked;
+      });
+    }
+  }
+
+  void _clearItems() {
+    if (_items.isEmpty) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('確認清空', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: const Text('確定要清除畫面上的公文掃描卡片嗎？\n（已寫入試算表的紀錄不會受影響）'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC62828)),
+            onPressed: () {
+              setState(() => _items.clear());
+              Navigator.pop(ctx);
+            },
+            child: const Text('確定清空'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pickAndProcessImages() async {
+    if (_isUploadingBatch) return;
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt_outlined, color: Color(0xFFC62828)),
+              title: const Text('拍攝公文首頁', style: TextStyle(fontWeight: FontWeight.w600)),
+              onTap: () async {
+                Navigator.pop(ctx);
+                final XFile? photo = await _picker.pickImage(
+                  source: ImageSource.camera,
+                  maxWidth: 1600,
+                  maxHeight: 1600,
+                  imageQuality: 85,
+                );
+                if (photo != null) _processQueue([photo]);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined, color: Color(0xFFC62828)),
+              title: const Text('從相簿選取（支援多選）', style: TextStyle(fontWeight: FontWeight.w600)),
+              onTap: () async {
+                Navigator.pop(ctx);
+                final List<XFile> images = await _picker.pickMultiImage(
+                  maxWidth: 1600,
+                  maxHeight: 1600,
+                  imageQuality: 85,
+                );
+                if (images.isNotEmpty) _processQueue(images);
+              },
             ),
           ],
         ),
@@ -664,41 +703,352 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
-  Widget _buildDetailRow(
-    IconData icon,
-    String label,
-    String value, {
-    Color? valueColor,
-    bool isHighlight = false,
-  }) {
+  Future<void> _processQueue(List<XFile> files) async {
+    setState(() => _isUploadingBatch = true);
+    try {
+      await WakelockPlus.enable();
+    } catch (_) {}
+
+    try {
+      for (final xfile in files) {
+        final fileName = xfile.name.isNotEmpty ? xfile.name : xfile.path.split('/').last;
+        final item = DocItem(fileName: fileName, filePath: xfile.path);
+        setState(() => _items.insert(0, item));
+
+        await _uploadWithRetry(item);
+        await Future.delayed(const Duration(milliseconds: 1200));
+      }
+    } finally {
+      try {
+        await WakelockPlus.disable();
+      } catch (_) {}
+      setState(() => _isUploadingBatch = false);
+    }
+  }
+
+  Future<void> _uploadWithRetry(DocItem item) async {
+    const int maxRetries = 2;
+    for (int attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        final success = await _uploadSingle(item);
+        if (success) return;
+      } catch (e) {
+        if (attempt < maxRetries) {
+          await Future.delayed(const Duration(seconds: 2));
+        } else {
+          setState(() {
+            item.isProcessing = false;
+            item.isSuccess = false;
+            item.errorMessage = e.toString();
+          });
+        }
+      }
+    }
+  }
+
+  Future<bool> _uploadSingle(DocItem item) async {
+    final receiveDateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
+    final request = http.MultipartRequest('POST', Uri.parse(docServerUrl));
+    request.fields['receive_date'] = receiveDateStr;
+    request.files.add(await http.MultipartFile.fromPath('file', item.filePath));
+
+    final streamed = await _httpClient.send(request).timeout(
+      const Duration(seconds: 60),
+      onTimeout: () => throw http.ClientException('連線逾時，請檢查伺服器連線'),
+    );
+    final res = await http.Response.fromStream(streamed);
+
+    if (res.statusCode == 200) {
+      final jsonMap = json.decode(utf8.decode(res.bodyBytes));
+      if (jsonMap['success'] == true) {
+        setState(() {
+          item.isProcessing = false;
+          item.isSuccess = true;
+          item.data = jsonMap['data'];
+        });
+        return true;
+      } else {
+        setState(() {
+          item.isProcessing = false;
+          item.isSuccess = false;
+          item.errorMessage = jsonMap['error'] ?? '公文辨識失敗';
+        });
+        return false;
+      }
+    } else {
+      setState(() {
+        item.isProcessing = false;
+        item.isSuccess = false;
+        item.errorMessage = '伺服器代碼: ${res.statusCode}';
+      });
+      return false;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
+
+    return Scaffold(
+      appBar: AppBar(
+        titleSpacing: 12,
+        title: const Row(
+          children: [
+            Icon(Icons.history_edu_rounded, color: Color(0xFFC62828), size: 28),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                '公文函文收文登記簿',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: Color(0xFFB71C1C)),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: Colors.white,
+        elevation: 0.8,
+        actions: [
+          IconButton(
+            tooltip: '開啟公文登記簿',
+            icon: const Icon(Icons.table_chart, color: Color(0xFF2E7D32)),
+            onPressed: _launchSheetUrl,
+          ),
+        ],
+      ),
+      body: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Column(
+          children: [
+            // 日期選擇條
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 3)),
+                ],
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.calendar_today_outlined, color: Color(0xFFC62828), size: 20),
+                  const SizedBox(width: 8),
+                  Text('受月日 (收文日): $dateStr', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                  const Spacer(),
+                  InkWell(
+                    onTap: _pickDate,
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(color: const Color(0xFFFFEBEE), borderRadius: BorderRadius.circular(12)),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.edit_calendar, size: 15, color: Color(0xFFC62828)),
+                          SizedBox(width: 4),
+                          Text('選擇日期', style: TextStyle(color: Color(0xFFC62828), fontSize: 12.5, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            // 按鈕
+            Row(
+              children: [
+                Expanded(
+                  flex: 3,
+                  child: InkWell(
+                    onTap: _isUploadingBatch ? null : _pickAndProcessImages,
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      decoration: BoxDecoration(
+                        gradient: _isUploadingBatch
+                            ? LinearGradient(colors: [Colors.grey.shade500, Colors.grey.shade600])
+                            : const LinearGradient(colors: [Color(0xFFD32F2F), Color(0xFFB71C1C)]),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(_isUploadingBatch ? Icons.wb_sunny_outlined : Icons.document_scanner, color: Colors.white, size: 20),
+                          const SizedBox(width: 8),
+                          Text(
+                            _isUploadingBatch ? '辨識歸檔中 (防休眠保護中)' : '拍攝 / 選取公文相片',
+                            style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold, color: Colors.white),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  flex: 1,
+                  child: InkWell(
+                    onTap: _launchSheetUrl,
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE8F5E9),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFA5D6A7)),
+                      ),
+                      child: const Icon(Icons.open_in_new, color: Color(0xFF2E7D32), size: 20),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('收文登記 (${_items.length})', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF546E7A))),
+                if (_items.isNotEmpty)
+                  InkWell(
+                    onTap: _isUploadingBatch ? null : _clearItems,
+                    child: const Row(
+                      children: [
+                        Icon(Icons.delete_sweep_outlined, size: 17, color: Color(0xFFD32F2F)),
+                        SizedBox(width: 4),
+                        Text('清空列表', style: TextStyle(color: Color(0xFFD32F2F), fontSize: 13, fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: _items.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.article_outlined, size: 64, color: Colors.grey.shade400),
+                          const SizedBox(height: 12),
+                          Text('請拍攝或選取公文首頁照片進行收文歸檔', style: TextStyle(color: Colors.grey.shade600)),
+                        ],
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: _items.length,
+                      itemBuilder: (ctx, i) => _buildDocCard(_items[i]),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDocCard(DocItem item) {
+    if (item.isProcessing) {
+      return Card(
+        color: Colors.white,
+        margin: const EdgeInsets.only(bottom: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5, color: Color(0xFFC62828))),
+              const SizedBox(width: 14),
+              Expanded(child: Text('${item.fileName} 正在提取公文資料並登記...')),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (item.isSuccess) {
+      final d = item.data ?? {};
+      return Card(
+        color: Colors.white,
+        margin: const EdgeInsets.only(bottom: 12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: Color(0xFFA5D6A7), width: 1.2),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.check_circle_rounded, color: Color(0xFF2E7D32), size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(item.fileName, style: const TextStyle(fontWeight: FontWeight.bold))),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(color: const Color(0xFFE8F5E9), borderRadius: BorderRadius.circular(8)),
+                    child: const Text('已收文歸檔', style: TextStyle(color: Color(0xFF2E7D32), fontWeight: FontWeight.bold, fontSize: 11.5)),
+                  ),
+                ],
+              ),
+              const Divider(height: 20),
+              _buildRow(Icons.business_outlined, '受文單位', d['recipient_unit'] ?? '無', isHighlight: true),
+              const SizedBox(height: 6),
+              _buildRow(Icons.account_balance, '發文機關', d['issuing_agency'] ?? '無', isHighlight: true),
+              const SizedBox(height: 6),
+              _buildRow(Icons.category_outlined, '文別', d['doc_type'] ?? '函'),
+              const SizedBox(height: 6),
+              _buildRow(Icons.tag, '發文字號', d['doc_number'] ?? '無', valueColor: const Color(0xFF1565C0), isHighlight: true),
+              const SizedBox(height: 6),
+              _buildRow(Icons.subject, '事由 / 主旨', d['subject'] ?? '無', valueColor: const Color(0xFF37474F)),
+              const SizedBox(height: 6),
+              _buildRow(Icons.attach_file, '附件', d['attachment'] ?? '無'),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Card(
+      color: const Color(0xFFFFFBFB),
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: Color(0xFFFFCDD2), width: 1.2),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.error_outline, color: Color(0xFFC62828), size: 20),
+                const SizedBox(width: 8),
+                Expanded(child: Text(item.fileName, style: const TextStyle(fontWeight: FontWeight.bold))),
+              ],
+            ),
+            const Divider(height: 20),
+            Text('錯誤: ${item.errorMessage}', style: const TextStyle(color: Color(0xFFC62828), fontSize: 12)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRow(IconData icon, String label, String value, {Color? valueColor, bool isHighlight = false}) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Icon(icon, size: 16, color: Colors.blueGrey.shade600),
         const SizedBox(width: 6),
-        Text(
-          '$label: ',
-          style: TextStyle(
-            color: Colors.blueGrey.shade800,
-            fontSize: 13,
-            fontWeight: isHighlight ? FontWeight.bold : FontWeight.normal,
-          ),
-        ),
-        Expanded(
-          child: Text(
-            value,
-            style: TextStyle(
-              color: valueColor ?? const Color(0xFF263238),
-              fontSize: 13,
-              fontWeight: isHighlight ? FontWeight.bold : FontWeight.normal,
-            ),
-          ),
-        ),
+        Text('$label: ', style: TextStyle(fontWeight: isHighlight ? FontWeight.bold : FontWeight.normal)),
+        Expanded(child: Text(value, style: TextStyle(color: valueColor, fontWeight: isHighlight ? FontWeight.bold : FontWeight.normal))),
       ],
     );
   }
 }
 
+// 企業 Logo 組件
 class CorporateLogoWidget extends StatelessWidget {
   final double size;
   const CorporateLogoWidget({super.key, this.size = 32});
