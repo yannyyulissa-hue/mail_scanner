@@ -57,9 +57,11 @@ class ScannerHomePage extends StatefulWidget {
 }
 
 class _ScannerHomePageState extends State<ScannerHomePage> {
+  // Cloud Run 後端網址
   final String serverUrl =
       'https://mail-scanner-backend-371376741005.asia-east1.run.app/api/scan-envelope';
 
+  // 雲端試算表網址
   final String sheetUrl =
       'https://docs.google.com/spreadsheets/d/1cPsfn_ggu01fsXG4XHxeiwS4ie5cQg4WO4QiYAW4BfE/edit?usp=sharing';
 
@@ -121,7 +123,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
-  // 選取照片：強制啟用解析度優化（maxWidth: 1600, imageQuality: 85），大幅縮減檔案體積
+  // 拍照 / 選圖：內建限制解析度 maxWidth: 1600，壓縮至約 300KB，避免連續傳送塞車
   Future<void> _pickAndProcessImages() async {
     if (_isUploadingBatch) return;
 
@@ -170,7 +172,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
-  // 循序佇列處理（加入間隔緩衝與失敗重試）
+  // 循序佇列：一張處理完畢再送下一張，並加入 0.5 秒微緩衝防 DNS 塞車
   Future<void> _processImagesQueue(List<XFile> files) async {
     setState(() {
       _isUploadingBatch = true;
@@ -184,10 +186,10 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         _scanItems.insert(0, item);
       });
 
-      // 傳送單張（內建自動重試 1 次）
+      // 執行上傳（失敗會自動重試 1 次）
       await _uploadWithRetry(item);
 
-      // 給網路通道 0.5 秒微緩衝，防止連續大併發卡死 DNS
+      // 間隔 0.5 秒緩衝
       await Future.delayed(const Duration(milliseconds: 500));
     }
 
@@ -196,15 +198,15 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     });
   }
 
-  // 單張上傳 + 遇到斷線自動重試一次
+  // 自動重試機制
   Future<void> _uploadWithRetry(ScanItem item) async {
     for (int attempt = 1; attempt <= 2; attempt++) {
       try {
         await _uploadSingleImage(item);
-        if (item.isSuccess) return; // 成功即返回
+        if (item.isSuccess) return;
       } catch (e) {
         if (attempt == 1) {
-          // 第一次失敗等待 2 秒再重試一次
+          // 遭遇網路抖動，等待 2 秒後重試一次
           await Future.delayed(const Duration(seconds: 2));
         } else {
           setState(() {
@@ -229,7 +231,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     final streamedResponse = await request.send().timeout(
       const Duration(seconds: 60),
       onTimeout: () {
-        throw http.ClientException('連線逾時，請檢查網路訊號');
+        throw http.ClientException('連線逾時，請確認網路連線');
       },
     );
 
@@ -297,6 +299,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Column(
           children: [
+            // 日期選擇條
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
@@ -352,6 +355,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               ),
             ),
             const SizedBox(height: 12),
+            // 功能按鈕區
             Row(
               children: [
                 Expanded(
@@ -425,6 +429,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               ],
             ),
             const SizedBox(height: 14),
+            // 結果清單標題與清空按鈕
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -461,6 +466,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               ],
             ),
             const SizedBox(height: 8),
+            // 列表主體
             Expanded(
               child: _scanItems.isEmpty
                   ? Center(
