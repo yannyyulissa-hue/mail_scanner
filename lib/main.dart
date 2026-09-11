@@ -193,11 +193,12 @@ class _MailScannerViewState extends State<MailScannerView> {
               title: const Text('開啟相機拍照', style: TextStyle(fontWeight: FontWeight.w600)),
               onTap: () async {
                 Navigator.pop(ctx);
+                // 1. 掛號信相機極限壓縮
                 final XFile? photo = await _picker.pickImage(
                   source: ImageSource.camera,
-                  maxWidth: 1600,
-                  maxHeight: 1600,
-                  imageQuality: 85,
+                  maxWidth: 1024,
+                  maxHeight: 1024,
+                  imageQuality: 70,
                 );
                 if (photo != null) _processQueue([photo]);
               },
@@ -207,10 +208,11 @@ class _MailScannerViewState extends State<MailScannerView> {
               title: const Text('從相簿選取（支援多選）', style: TextStyle(fontWeight: FontWeight.w600)),
               onTap: () async {
                 Navigator.pop(ctx);
+                // 2. 掛號信相簿多選極限壓縮
                 final List<XFile> images = await _picker.pickMultiImage(
-                  maxWidth: 1600,
-                  maxHeight: 1600,
-                  imageQuality: 85,
+                  maxWidth: 1024,
+                  maxHeight: 1024,
+                  imageQuality: 70,
                 );
                 if (images.isNotEmpty) _processQueue(images);
               },
@@ -592,7 +594,6 @@ class _DocScannerViewState extends State<DocScannerView> {
   final String docServerUrl =
       'https://mail-scanner-backend-371376741005.asia-east1.run.app/api/scan-official-doc';
 
-  // 💡 已更新為指定的公文登記簿 Google 試算表連結
   final String docSheetUrl =
       'https://docs.google.com/spreadsheets/d/1JRaB8g6VCWo-5ohdCphfwFA1IcooxlmH3puizsVMej8/edit?usp=drive_link';
 
@@ -672,11 +673,12 @@ class _DocScannerViewState extends State<DocScannerView> {
               title: const Text('拍攝公文首頁', style: TextStyle(fontWeight: FontWeight.w600)),
               onTap: () async {
                 Navigator.pop(ctx);
+                // 3. 公文相機極限壓縮
                 final XFile? photo = await _picker.pickImage(
                   source: ImageSource.camera,
-                  maxWidth: 1600,
-                  maxHeight: 1600,
-                  imageQuality: 85,
+                  maxWidth: 1024,
+                  maxHeight: 1024,
+                  imageQuality: 70,
                 );
                 if (photo != null) _processQueue([photo]);
               },
@@ -686,10 +688,11 @@ class _DocScannerViewState extends State<DocScannerView> {
               title: const Text('從相簿選取（支援多選）', style: TextStyle(fontWeight: FontWeight.w600)),
               onTap: () async {
                 Navigator.pop(ctx);
+                // 4. 公文相簿多選極限壓縮
                 final List<XFile> images = await _picker.pickMultiImage(
-                  maxWidth: 1600,
-                  maxHeight: 1600,
-                  imageQuality: 85,
+                  maxWidth: 1024,
+                  maxHeight: 1024,
+                  imageQuality: 70,
                 );
                 if (images.isNotEmpty) _processQueue(images);
               },
@@ -1060,47 +1063,45 @@ class CorporateLogoWidget extends StatelessWidget {
     return SizedBox(
       width: size * 1.15,
       height: size,
-      child: {
-        return Stack(
-          alignment: Alignment.center,
-          children: [
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              height: size * 0.52,
-              child: Container(
-                decoration: const BoxDecoration(
-                  color: Color(0xFF00A0E9),
-                  borderRadius: BorderRadius.all(Radius.elliptical(100, 50)),
-                ),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            height: size * 0.52,
+            child: Container(
+              decoration: const BoxDecoration(
+                color: Color(0xFF00A0E9),
+                borderRadius: BorderRadius.all(Radius.elliptical(100, 50)),
               ),
             ),
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              height: size * 0.52,
-              child: Container(
-                decoration: const BoxDecoration(
-                  color: Color(0xFF009944),
-                  borderRadius: BorderRadius.all(Radius.elliptical(100, 50)),
-                ),
+          ),
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: size * 0.52,
+            child: Container(
+              decoration: const BoxDecoration(
+                color: Color(0xFF009944),
+                borderRadius: BorderRadius.all(Radius.elliptical(100, 50)),
               ),
             ),
-            Text(
-              'H',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: size * 0.72,
-                fontWeight: FontWeight.w900,
-                fontFamily: 'serif',
-                height: 1.0,
-              ),
+          ),
+          Text(
+            'H',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: size * 0.72,
+              fontWeight: FontWeight.w900,
+              fontFamily: 'serif',
+              height: 1.0,
             ),
-          ],
-        );
-      }(),
+          ),
+        ],
+      ),
     );
   }
 }
