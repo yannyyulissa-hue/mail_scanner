@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
@@ -120,6 +121,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
+  // 選取照片：強制啟用解析度優化（maxWidth: 1600, imageQuality: 85），大幅縮減檔案體積
   Future<void> _pickAndProcessImages() async {
     if (_isUploadingBatch) return;
 
@@ -136,7 +138,12 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               title: const Text('開啟相機拍照', style: TextStyle(fontWeight: FontWeight.w600)),
               onTap: () async {
                 Navigator.pop(ctx);
-                final XFile? photo = await _picker.pickImage(source: ImageSource.camera);
+                final XFile? photo = await _picker.pickImage(
+                  source: ImageSource.camera,
+                  maxWidth: 1600,
+                  maxHeight: 1600,
+                  imageQuality: 85,
+                );
                 if (photo != null) {
                   _processImagesQueue([photo]);
                 }
@@ -147,7 +154,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
               title: const Text('從相簿選擇（支援多選）', style: TextStyle(fontWeight: FontWeight.w600)),
               onTap: () async {
                 Navigator.pop(ctx);
-                final List<XFile> images = await _picker.pickMultiImage();
+                final List<XFile> images = await _picker.pickMultiImage(
+                  maxWidth: 1600,
+                  maxHeight: 1600,
+                  imageQuality: 85,
+                );
                 if (images.isNotEmpty) {
                   _processImagesQueue(images);
                 }
@@ -159,6 +170,7 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     );
   }
 
+  // 循序佇列處理（加入間隔緩衝與失敗重試）
   Future<void> _processImagesQueue(List<XFile> files) async {
     setState(() {
       _isUploadingBatch = true;
@@ -172,7 +184,11 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
         _scanItems.insert(0, item);
       });
 
-      await _uploadSingleImage(item);
+      // 傳送單張（內建自動重試 1 次）
+      await _uploadWithRetry(item);
+
+      // 給網路通道 0.5 秒微緩衝，防止連續大併發卡死 DNS
+      await Future.delayed(const Duration(milliseconds: 500));
     }
 
     setState(() {
@@ -180,52 +196,65 @@ class _ScannerHomePageState extends State<ScannerHomePage> {
     });
   }
 
-  Future<void> _uploadSingleImage(ScanItem item) async {
-    final archiveDateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
-
-    try {
-      final request = http.MultipartRequest('POST', Uri.parse(serverUrl));
-      request.fields['archive_date'] = archiveDateStr;
-      request.files.add(
-        await http.MultipartFile.fromPath('file', item.filePath),
-      );
-
-      final streamedResponse = await request.send().timeout(
-        const Duration(seconds: 90),
-        onTimeout: () {
-          throw http.ClientException('伺服器處理逾時，請檢查網路訊號');
-        },
-      );
-
-      final response = await http.Response.fromStream(streamedResponse);
-
-      if (response.statusCode == 200) {
-        final resJson = json.decode(utf8.decode(response.bodyBytes));
-        if (resJson['success'] == true) {
-          setState(() {
-            item.isProcessing = false;
-            item.isSuccess = true;
-            item.data = resJson['data'];
-          });
+  // 單張上傳 + 遇到斷線自動重試一次
+  Future<void> _uploadWithRetry(ScanItem item) async {
+    for (int attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await _uploadSingleImage(item);
+        if (item.isSuccess) return; // 成功即返回
+      } catch (e) {
+        if (attempt == 1) {
+          // 第一次失敗等待 2 秒再重試一次
+          await Future.delayed(const Duration(seconds: 2));
         } else {
           setState(() {
             item.isProcessing = false;
             item.isSuccess = false;
-            item.errorMessage = resJson['error'] ?? '辨識失敗';
+            item.errorMessage = e.toString();
           });
         }
+      }
+    }
+  }
+
+  Future<void> _uploadSingleImage(ScanItem item) async {
+    final archiveDateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
+
+    final request = http.MultipartRequest('POST', Uri.parse(serverUrl));
+    request.fields['archive_date'] = archiveDateStr;
+    request.files.add(
+      await http.MultipartFile.fromPath('file', item.filePath),
+    );
+
+    final streamedResponse = await request.send().timeout(
+      const Duration(seconds: 60),
+      onTimeout: () {
+        throw http.ClientException('連線逾時，請檢查網路訊號');
+      },
+    );
+
+    final response = await http.Response.fromStream(streamedResponse);
+
+    if (response.statusCode == 200) {
+      final resJson = json.decode(utf8.decode(response.bodyBytes));
+      if (resJson['success'] == true) {
+        setState(() {
+          item.isProcessing = false;
+          item.isSuccess = true;
+          item.data = resJson['data'];
+        });
       } else {
         setState(() {
           item.isProcessing = false;
           item.isSuccess = false;
-          item.errorMessage = '伺服器回應代碼: ${response.statusCode}';
+          item.errorMessage = resJson['error'] ?? '辨識失敗';
         });
       }
-    } catch (e) {
+    } else {
       setState(() {
         item.isProcessing = false;
         item.isSuccess = false;
-        item.errorMessage = e.toString();
+        item.errorMessage = '伺服器代碼: ${response.statusCode}';
       });
     }
   }
