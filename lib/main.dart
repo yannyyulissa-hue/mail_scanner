@@ -33,9 +33,6 @@ class UnifiedScannerApp extends StatelessWidget {
   }
 }
 
-// -------------------------------------------------------------
-// 主畫面底層框架（底部導航切換）
-// -------------------------------------------------------------
 class MainNavigationShell extends StatefulWidget {
   const MainNavigationShell({super.key});
 
@@ -83,11 +80,10 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
 }
 
 // =============================================================
-// 分頁一：掛號信件歸檔 (MailScannerView - 藍色系)
+// 分頁一：掛號信件歸檔 (支援單拍、連拍背面、相簿多選)
 // =============================================================
 class MailItem {
   final String fileName;
-  final String filePath;
   bool isProcessing;
   bool isSuccess;
   String? errorMessage;
@@ -95,7 +91,6 @@ class MailItem {
 
   MailItem({
     required this.fileName,
-    required this.filePath,
     this.isProcessing = true,
     this.isSuccess = false,
     this.errorMessage,
@@ -111,8 +106,8 @@ class MailScannerView extends StatefulWidget {
 }
 
 class _MailScannerViewState extends State<MailScannerView> {
-  final String serverUrl =
-      'https://mail-scanner-backend-371376741005.asia-east1.run.app/api/scan-envelope';
+  final String batchServerUrl =
+      'https://mail-scanner-backend-371376741005.asia-east1.run.app/api/scan-envelopes-batch';
 
   final String sheetUrl =
       'https://docs.google.com/spreadsheets/d/1cPsfn_ggu01fsXG4XHxeiwS4ie5cQg4WO4QiYAW4BfE/edit?usp=sharing';
@@ -177,6 +172,115 @@ class _MailScannerViewState extends State<MailScannerView> {
     );
   }
 
+  // 拍照連拍流程：支援單面或加拍背面
+  Future<void> _startCameraWorkflow() async {
+    final XFile? frontPhoto = await _picker.pickImage(
+      source: ImageSource.camera,
+      maxWidth: 1024,
+      maxHeight: 1024,
+      imageQuality: 70,
+    );
+
+    if (frontPhoto == null) return;
+
+    if (!mounted) return;
+
+    // 拍完正面後跳出快速選項引導
+    final bool? needBackSide = await showModalBottomSheet<bool>(
+      context: context,
+      barrierColor: Colors.black54,
+      isDismissible: false,
+      enableDrag: false,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const Row(
+                children: [
+                  Icon(Icons.check_circle_outline, color: Color(0xFF1976D2), size: 24),
+                  SizedBox(width: 10),
+                  Text(
+                    '信封正面拍照完成',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '該信件的郵局掛號條碼是貼在正面還是背面？',
+                style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        side: const BorderSide(color: Color(0xFF1976D2)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      icon: const Icon(Icons.send_rounded, color: Color(0xFF1976D2)),
+                      label: const Text('直接歸檔 (單面)', style: TextStyle(color: Color(0xFF1976D2), fontWeight: FontWeight.bold)),
+                      onPressed: () => Navigator.pop(ctx, false),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        backgroundColor: const Color(0xFF1976D2),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      icon: const Icon(Icons.flip_to_back_rounded),
+                      label: const Text('加拍背面條碼', style: TextStyle(fontWeight: FontWeight.bold)),
+                      onPressed: () => Navigator.pop(ctx, true),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (needBackSide == true) {
+      // 喚起相機拍攝背面
+      final XFile? backPhoto = await _picker.pickImage(
+        source: ImageSource.camera,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 70,
+      );
+
+      if (backPhoto != null) {
+        _processBatch([frontPhoto, backPhoto]);
+      } else {
+        // 若使用者放棄拍背面，依然將正面送出
+        _processBatch([frontPhoto]);
+      }
+    } else if (needBackSide == false) {
+      _processBatch([frontPhoto]);
+    }
+  }
+
   Future<void> _pickAndProcessImages() async {
     if (_isUploadingBatch) return;
 
@@ -190,31 +294,23 @@ class _MailScannerViewState extends State<MailScannerView> {
           children: [
             ListTile(
               leading: const Icon(Icons.camera_alt_outlined, color: Color(0xFF1976D2)),
-              title: const Text('開啟相機拍照', style: TextStyle(fontWeight: FontWeight.w600)),
-              onTap: () async {
+              title: const Text('開啟相機拍照（支援單/雙面連拍）', style: TextStyle(fontWeight: FontWeight.w600)),
+              onTap: () {
                 Navigator.pop(ctx);
-                // 1. 掛號信相機極限壓縮
-                final XFile? photo = await _picker.pickImage(
-                  source: ImageSource.camera,
-                  maxWidth: 1024,
-                  maxHeight: 1024,
-                  imageQuality: 70,
-                );
-                if (photo != null) _processQueue([photo]);
+                _startCameraWorkflow();
               },
             ),
             ListTile(
               leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF1976D2)),
-              title: const Text('從相簿選取（支援多選）', style: TextStyle(fontWeight: FontWeight.w600)),
+              title: const Text('從相簿選取（支援單面/雙面多選）', style: TextStyle(fontWeight: FontWeight.w600)),
               onTap: () async {
                 Navigator.pop(ctx);
-                // 2. 掛號信相簿多選極限壓縮
                 final List<XFile> images = await _picker.pickMultiImage(
                   maxWidth: 1024,
                   maxHeight: 1024,
                   imageQuality: 70,
                 );
-                if (images.isNotEmpty) _processQueue(images);
+                if (images.isNotEmpty) _processBatch(images);
               },
             ),
           ],
@@ -223,85 +319,82 @@ class _MailScannerViewState extends State<MailScannerView> {
     );
   }
 
-  Future<void> _processQueue(List<XFile> files) async {
+  Future<void> _processBatch(List<XFile> files) async {
     setState(() => _isUploadingBatch = true);
     try {
       await WakelockPlus.enable();
     } catch (_) {}
 
-    try {
-      for (final xfile in files) {
-        final fileName = xfile.name.isNotEmpty ? xfile.name : xfile.path.split('/').last;
-        final item = MailItem(fileName: fileName, filePath: xfile.path);
-        setState(() => _items.insert(0, item));
+    final processingItem = MailItem(
+      fileName: '批次處理中 (${files.length} 張相片，比對與歸檔中...)',
+      isProcessing: true,
+    );
+    setState(() => _items.insert(0, processingItem));
 
-        await _uploadWithRetry(item);
-        await Future.delayed(const Duration(milliseconds: 1200));
+    try {
+      final archiveDateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
+      final request = http.MultipartRequest('POST', Uri.parse(batchServerUrl));
+      request.fields['archive_date'] = archiveDateStr;
+
+      for (final xfile in files) {
+        request.files.add(await http.MultipartFile.fromPath('files', xfile.path));
+        int timestamp = DateTime.now().millisecondsSinceEpoch;
+        try {
+          final stat = await File(xfile.path).stat();
+          timestamp = stat.modified.millisecondsSinceEpoch;
+        } catch (_) {}
+        request.fields.addAll({'timestamps': timestamp.toString()});
       }
+
+      final streamed = await _httpClient.send(request).timeout(
+        const Duration(seconds: 120),
+        onTimeout: () => throw http.ClientException('批次辨識連線逾時'),
+      );
+      final res = await http.Response.fromStream(streamed);
+
+      if (res.statusCode == 200) {
+        final jsonMap = json.decode(utf8.decode(res.bodyBytes));
+        if (jsonMap['success'] == true) {
+          setState(() {
+            _items.remove(processingItem);
+            final List results = jsonMap['data'] ?? [];
+            for (var d in results) {
+              _items.insert(
+                0,
+                MailItem(
+                  fileName: d['file_name'] ?? '信件',
+                  isProcessing: false,
+                  isSuccess: true,
+                  data: d,
+                ),
+              );
+            }
+          });
+        } else {
+          setState(() {
+            processingItem.isProcessing = false;
+            processingItem.isSuccess = false;
+            processingItem.errorMessage = jsonMap['error'] ?? '批次處理失敗';
+          });
+        }
+      } else {
+        setState(() {
+          processingItem.isProcessing = false;
+          processingItem.isSuccess = false;
+          processingItem.errorMessage = '伺服器代碼: ${res.statusCode}';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        processingItem.isProcessing = false;
+        processingItem.isSuccess = false;
+        processingItem.errorMessage = e.toString();
+      });
     } finally {
       try {
         await WakelockPlus.disable();
       } catch (_) {}
       setState(() => _isUploadingBatch = false);
-    }
-  }
-
-  Future<void> _uploadWithRetry(MailItem item) async {
-    const int maxRetries = 2;
-    for (int attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        final success = await _uploadSingle(item);
-        if (success) return;
-      } catch (e) {
-        if (attempt < maxRetries) {
-          await Future.delayed(const Duration(seconds: 2));
-        } else {
-          setState(() {
-            item.isProcessing = false;
-            item.isSuccess = false;
-            item.errorMessage = e.toString();
-          });
-        }
-      }
-    }
-  }
-
-  Future<bool> _uploadSingle(MailItem item) async {
-    final archiveDateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
-    final request = http.MultipartRequest('POST', Uri.parse(serverUrl));
-    request.fields['archive_date'] = archiveDateStr;
-    request.files.add(await http.MultipartFile.fromPath('file', item.filePath));
-
-    final streamed = await _httpClient.send(request).timeout(
-      const Duration(seconds: 60),
-      onTimeout: () => throw http.ClientException('連線逾時，請檢查網路'),
-    );
-    final res = await http.Response.fromStream(streamed);
-
-    if (res.statusCode == 200) {
-      final jsonMap = json.decode(utf8.decode(res.bodyBytes));
-      if (jsonMap['success'] == true) {
-        setState(() {
-          item.isProcessing = false;
-          item.isSuccess = true;
-          item.data = jsonMap['data'];
-        });
-        return true;
-      } else {
-        setState(() {
-          item.isProcessing = false;
-          item.isSuccess = false;
-          item.errorMessage = jsonMap['error'] ?? '辨識失敗';
-        });
-        return false;
-      }
-    } else {
-      setState(() {
-        item.isProcessing = false;
-        item.isSuccess = false;
-        item.errorMessage = '伺服器代碼: ${res.statusCode}';
-      });
-      return false;
     }
   }
 
@@ -394,7 +487,7 @@ class _MailScannerViewState extends State<MailScannerView> {
                           Icon(_isUploadingBatch ? Icons.wb_sunny_outlined : Icons.camera_alt, color: Colors.white, size: 20),
                           const SizedBox(width: 8),
                           Text(
-                            _isUploadingBatch ? '歸檔中 (防休眠常亮保護)' : '拍攝 / 選取信封照片',
+                            _isUploadingBatch ? '辨識合併中 (防休眠常亮保護)' : '拍攝 / 選取信封照片',
                             style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold, color: Colors.white),
                           ),
                         ],
@@ -448,7 +541,7 @@ class _MailScannerViewState extends State<MailScannerView> {
                         children: [
                           Icon(Icons.mark_email_read_outlined, size: 64, color: Colors.grey.shade400),
                           const SizedBox(height: 12),
-                          Text('點擊上方按鈕拍攝或選擇信封', style: TextStyle(color: Colors.grey.shade600)),
+                          Text('點擊上方按鈕拍照或多選相片（支援正反面自動合併）', style: TextStyle(color: Colors.grey.shade600)),
                         ],
                       ),
                     )
@@ -475,7 +568,7 @@ class _MailScannerViewState extends State<MailScannerView> {
             children: [
               const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5)),
               const SizedBox(width: 14),
-              Expanded(child: Text('${item.fileName} 正在辨識歸檔...')),
+              Expanded(child: Text(item.fileName)),
             ],
           ),
         ),
@@ -563,7 +656,7 @@ class _MailScannerViewState extends State<MailScannerView> {
 }
 
 // =============================================================
-// 分頁二：公文函文收文 (DocScannerView - 綠色系)
+// 分頁二：公文函文收文
 // =============================================================
 class DocItem {
   final String fileName;
@@ -673,14 +766,13 @@ class _DocScannerViewState extends State<DocScannerView> {
               title: const Text('拍攝公文首頁', style: TextStyle(fontWeight: FontWeight.w600)),
               onTap: () async {
                 Navigator.pop(ctx);
-                // 3. 公文相機極限壓縮
                 final XFile? photo = await _picker.pickImage(
                   source: ImageSource.camera,
                   maxWidth: 1024,
                   maxHeight: 1024,
                   imageQuality: 70,
                 );
-                if (photo != null) _processQueue([photo]);
+                if (photo != null) _processDocQueue([photo]);
               },
             ),
             ListTile(
@@ -688,13 +780,12 @@ class _DocScannerViewState extends State<DocScannerView> {
               title: const Text('從相簿選取（支援多選）', style: TextStyle(fontWeight: FontWeight.w600)),
               onTap: () async {
                 Navigator.pop(ctx);
-                // 4. 公文相簿多選極限壓縮
                 final List<XFile> images = await _picker.pickMultiImage(
                   maxWidth: 1024,
                   maxHeight: 1024,
                   imageQuality: 70,
                 );
-                if (images.isNotEmpty) _processQueue(images);
+                if (images.isNotEmpty) _processDocQueue(images);
               },
             ),
           ],
@@ -703,7 +794,7 @@ class _DocScannerViewState extends State<DocScannerView> {
     );
   }
 
-  Future<void> _processQueue(List<XFile> files) async {
+  Future<void> _processDocQueue(List<XFile> files) async {
     setState(() => _isUploadingBatch = true);
     try {
       await WakelockPlus.enable();
@@ -715,7 +806,7 @@ class _DocScannerViewState extends State<DocScannerView> {
         final item = DocItem(fileName: fileName, filePath: xfile.path);
         setState(() => _items.insert(0, item));
 
-        await _uploadWithRetry(item);
+        await _uploadDocWithRetry(item);
         await Future.delayed(const Duration(milliseconds: 1200));
       }
     } finally {
@@ -726,11 +817,11 @@ class _DocScannerViewState extends State<DocScannerView> {
     }
   }
 
-  Future<void> _uploadWithRetry(DocItem item) async {
+  Future<void> _uploadDocWithRetry(DocItem item) async {
     const int maxRetries = 2;
     for (int attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        final success = await _uploadSingle(item);
+        final success = await _uploadDocSingle(item);
         if (success) return;
       } catch (e) {
         if (attempt < maxRetries) {
@@ -746,7 +837,7 @@ class _DocScannerViewState extends State<DocScannerView> {
     }
   }
 
-  Future<bool> _uploadSingle(DocItem item) async {
+  Future<bool> _uploadDocSingle(DocItem item) async {
     final receiveDateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
     final request = http.MultipartRequest('POST', Uri.parse(docServerUrl));
     request.fields['receive_date'] = receiveDateStr;
@@ -867,13 +958,6 @@ class _DocScannerViewState extends State<DocScannerView> {
                             ? LinearGradient(colors: [Colors.grey.shade500, Colors.grey.shade600])
                             : const LinearGradient(colors: [Color(0xFF2E7D32), Color(0xFF1B5E20)]),
                         borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: const Color(0xFF2E7D32).withOpacity(0.25),
-                            blurRadius: 8,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -1053,7 +1137,6 @@ class _DocScannerViewState extends State<DocScannerView> {
   }
 }
 
-// 企業 Logo 組件
 class CorporateLogoWidget extends StatelessWidget {
   final double size;
   const CorporateLogoWidget({super.key, this.size = 32});
