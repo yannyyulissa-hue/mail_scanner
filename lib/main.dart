@@ -18,7 +18,7 @@ class UnifiedScannerApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '台中營業處文書歸檔系統',
+      title: '郵件與公文掃描',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
@@ -80,7 +80,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
 }
 
 // =============================================================
-// 分頁一：掛號信件歸檔 (真正批次整包上傳與正反配對)
+// 分頁一：掛號信件歸檔 (支援單拍、正反連拍、相簿多選批次)
 // =============================================================
 class MailItem {
   final String fileName;
@@ -106,7 +106,6 @@ class MailScannerView extends StatefulWidget {
 }
 
 class _MailScannerViewState extends State<MailScannerView> {
-  // 批次配對端點
   final String batchServerUrl =
       'https://mail-scanner-backend-371376741005.asia-east1.run.app/api/scan-envelopes-batch';
 
@@ -173,7 +172,7 @@ class _MailScannerViewState extends State<MailScannerView> {
     );
   }
 
-  // 拍照流程：支援連拍正反面整併打包
+  // 拍照流程：支援單面拍照或連拍背面條碼
   Future<void> _startCameraWorkflow() async {
     final XFile? frontPhoto = await _picker.pickImage(
       source: ImageSource.camera,
@@ -217,7 +216,7 @@ class _MailScannerViewState extends State<MailScannerView> {
               ),
               const SizedBox(height: 8),
               Text(
-                '該信件是否需要拍背面條碼？',
+                '該信件是否需要拍攝背面條碼？',
                 style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
               ),
               const SizedBox(height: 20),
@@ -265,7 +264,6 @@ class _MailScannerViewState extends State<MailScannerView> {
       );
 
       if (backPhoto != null) {
-        // 同一包 Request 傳送兩張
         _processBatchInOneRequest([frontPhoto, backPhoto]);
       } else {
         _processBatchInOneRequest([frontPhoto]);
@@ -296,7 +294,7 @@ class _MailScannerViewState extends State<MailScannerView> {
             ),
             ListTile(
               leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF1976D2)),
-              title: const Text('從相簿選取（支援單面/雙面多選）', style: TextStyle(fontWeight: FontWeight.w600)),
+              title: const Text('從相簿選取（支援多選、正反面自動合併）', style: TextStyle(fontWeight: FontWeight.w600)),
               onTap: () async {
                 Navigator.pop(ctx);
                 final List<XFile> images = await _picker.pickMultiImage(
@@ -315,7 +313,7 @@ class _MailScannerViewState extends State<MailScannerView> {
     );
   }
 
-  // 將所有選中的相片打包在同一個 HTTP Request 發送
+  // 真正將整批照片打包在同一個 MultipartRequest 傳送
   Future<void> _processBatchInOneRequest(List<XFile> files) async {
     setState(() => _isUploadingBatch = true);
     try {
@@ -334,17 +332,9 @@ class _MailScannerViewState extends State<MailScannerView> {
       final request = http.MultipartRequest('POST', uri);
       request.fields['archive_date'] = archiveDateStr;
 
-      for (int i = 0; i < files.length; i++) {
-        final xfile = files[i];
+      // 將每張檔案依序加入請求
+      for (final xfile in files) {
         request.files.add(await http.MultipartFile.fromPath('files', xfile.path));
-
-        // 提取時間戳記，若 EXIF 無法取得則使用檔案時間或遞增毫秒保證先後順序
-        int ts = DateTime.now().millisecondsSinceEpoch + (i * 1000);
-        try {
-          final stat = await File(xfile.path).stat();
-          ts = stat.modified.millisecondsSinceEpoch;
-        } catch (_) {}
-        request.fields.addAll({'timestamps': ts.toString()});
       }
 
       final streamed = await _httpClient.send(request).timeout(
@@ -412,7 +402,7 @@ class _MailScannerViewState extends State<MailScannerView> {
             const SizedBox(width: 10),
             const Expanded(
               child: Text(
-                '台中營業處掛號信歸檔',
+                '郵件與公文掃描 - 掛號信件',
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: Color(0xFF1A237E)),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -890,7 +880,7 @@ class _DocScannerViewState extends State<DocScannerView> {
             SizedBox(width: 10),
             Expanded(
               child: Text(
-                '公文函文收文登記簿',
+                '郵件與公文掃描 - 公文登記',
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: Color(0xFF1B5E20)),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -959,13 +949,6 @@ class _DocScannerViewState extends State<DocScannerView> {
                             ? LinearGradient(colors: [Colors.grey.shade500, Colors.grey.shade600])
                             : const LinearGradient(colors: [Color(0xFF2E7D32), Color(0xFF1B5E20)]),
                         borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: const Color(0xFF2E7D32).withOpacity(0.25),
-                            blurRadius: 8,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
